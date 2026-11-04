@@ -149,6 +149,7 @@ function renderBeat(p) {
       <input type="number" step="0.1" inputmode="decimal" value="${p.bpm}" data-act="bpm-input" style="width:80px;text-align:center">
       <button class="btn icon" data-act="bpm" data-d="0.5">+</button></div>
     <div class="row"><span>Tempo</span><span class="spacer"></span>
+      <button class="btn small tap" data-act="tap">${tap.times.length > 1 ? 'Tap · ' + tap.bpm.toFixed(1) : 'Tap tempo'}</button>
       <button class="btn small" data-act="bpm-mul" data-m="0.5">÷2</button>
       <button class="btn small" data-act="bpm-mul" data-m="2">×2</button></div>
     <div class="row"><span>Początek taktu 1</span><span class="spacer"></span>
@@ -637,6 +638,7 @@ document.addEventListener('click', async e => {
       else state.sel.b = b;
       render(); return;
     }
+    case 'tap': return; // obsługa w pointerdown (dokładniejszy czas)
     case 'tl-mode': tl.mode = el.dataset.m; render(); return;
     case 'tl-zoom': {
       const c = tlCanvas(); const w = c ? c.clientWidth : 300;
@@ -703,6 +705,10 @@ document.addEventListener('click', async e => {
   }
 });
 
+document.addEventListener('pointerdown', e => {
+  if (e.target.closest('[data-act="tap"]') && cur()) { e.preventDefault(); tapTempo(cur()); }
+});
+
 document.addEventListener('input', e => {
   const el = e.target, act = el.dataset.act, p = cur();
   if (!act || !p) return;
@@ -742,6 +748,21 @@ function openProject(id, tab) {
   state.currentId = id; state.sel = null;
   localStorage.setItem('currentId', id);
   setTab(tab);
+}
+
+// ---------- tap tempo ----------
+const tap = { times: [], bpm: 0 };
+function tapTempo(p) {
+  const now = performance.now();
+  if (tap.times.length && now - tap.times[tap.times.length - 1] > 2000) tap.times = [];
+  tap.times.push(now);
+  if (tap.times.length > 12) tap.times.shift();
+  if (tap.times.length > 1) {
+    const n = tap.times.length - 1;
+    tap.bpm = 60000 / ((tap.times[n] - tap.times[0]) / n);
+    if (tap.times.length >= 4) { p.bpm = Math.round(tap.bpm * 10) / 10; clampSections(p); save(p); }
+  }
+  render();
 }
 
 // ---------- oś czasu (przebieg bitu + takty) ----------
