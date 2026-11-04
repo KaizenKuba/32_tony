@@ -1,0 +1,731 @@
+import { db } from './db.js';
+import { Engine } from './audio.js';
+import { analyzeBeat, envelope, autoLatency } from './analyze.js';
+
+// ---------- model ----------
+const KINDS = [
+  ['intro', 'Intro'], ['verse', 'Zwrotka'], ['prechorus', 'Przedrefren'], ['chorus', 'Refren'],
+  ['bridge', 'Bridge'], ['outro', 'Outro'], ['other', 'Inne'],
+];
+const KIND_LABEL = Object.fromEntries(KINDS);
+const NUMBERED = new Set(['verse', 'chorus', 'prechorus', 'bridge', 'other']);
+
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now());
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const ICON = {
+  eye: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  eyeOff: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10s3.5 5 10 5 10-5 10-5"/><path d="M5 13.5 3 16M9.5 15 8.5 18M14.5 15l1 3M19 13.5l2 2.5"/></svg>',
+  trash: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
+};
+const newLine = () => ({ id: uid(), versions: [{ id: uid(), text: '', visible: true }] });
+const secTitle = s => NUMBERED.has(s.kind) ? `${KIND_LABEL[s.kind]} ${s.number}` : KIND_LABEL[s.kind];
+const barDur = p => 60 / p.bpm * p.beatsPerBar;
+const barCount = p => (p.beatDuration > 0 && p.bpm > 0) ? Math.max(1, Math.ceil((p.beatDuration - p.firstDownbeat) / barDur(p))) : 0;
+const timeOfBar = (p, b) => p.firstDownbeat + (b - 1) * barDur(p);
+const barAt = (p, t) => Math.max(1, Math.floor((t - p.firstDownbeat) / barDur(p)) + 1);
+const sectionAt = (p, b) => p.sections.find(s => b >= s.startBar && b <= s.endBar);
+
+function syncLines(s) {
+  const n = s.endBar - s.startBar + 1;
+  while (s.lines.length < n) s.lines.push(newLine());
+  if (s.lines.length > n) s.lines.length = n;
+}
+
+function newProject(name) {
+  return {
+    id: uid(), name: name || 'Nowa piosenka', created: Date.now(),
+    beatKey: null, beatName: '', beatDuration: 0, bpm: 90, beatsPerBar: 4, firstDownbeat: 0,
+    sections: [], tracks: [],
+    playMode: 'long', longStartBar: 1, loopStartBar: 1, loopEndBar: 4,
+  };
+}
+
+// ---------- stan ----------
+const engine = new Engine();
+const state = {
+  projects: [],
+  currentId: localStorage.getItem('currentId'),
+  tab: 'projects',
+  sel: null, // {a, b}
+  follow: true,
+  analyzing: false,
+  latencyMs: Number(localStorage.getItem('latencyMs') || 0),
+  micId: localStorage.getItem('micId') || '',
+  micLabel: '',
+  inputs: [],
+  recTrackId: null,
+};
+const buffers = new Map(); // key -> AudioBuffer
+const cur = () => state.projects.find(p => p.id === state.currentId);
+
+let saveTimer;
+function save(p = cur()) {
+  if (!p) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => db.putProject(p), 250);
+}
+window.addEventListener('pagehide', () => { const p = cur(); if (p) db.putProject(p); });
+
+async function getBuffer(key) {
+  if (!key) return null;
+  if (buffers.has(key)) return buffers.get(key);
+  const blob = await db.getBlob(key);
+  if (!blob) return null;
+  const b = await engine.decode(blob);
+  buffers.set(key, b);
+  return b;
+}
+
+// ---------- DOM ----------
+const $ = s => document.querySelector(s);
+const view = $('#view'), transport = $('#transport'), titleEl = $('#title'), topAction = $('#topaction');
+
+function setTab(t) {
+  if (t !== 'projects' && !cur()) t = 'projects';
+  state.tab = t;
+  document.querySelectorAll('#tabs button').forEach(b => {
+    b.classList.toggle('on', b.dataset.tab === t);
+    b.disabled = b.dataset.tab !== 'projects' && !cur();
+  });
+  view.scrollTop = 0;
+  render();
+}
+
+function render() {
+  const keep = view.scrollTop;
+  const p = cur();
+  topAction.innerHTML = '';
+  if (state.tab === 'projects') renderProjects();
+  else if (state.tab === 'beat') renderBeat(p);
+  else renderLyrics(p);
+  transport.hidden = state.tab === 'projects' || !p || !p.beatKey;
+  if (!transport.hidden) renderTransport(p);
+  view.scrollTop = keep;
+  updatePlayhead(true);
+}
+
+// ---------- Projekty ----------
+function renderProjects() {
+  titleEl.textContent = 'Projekty';
+  topAction.innerHTML = `<button class="btn small primary" data-act="new-project">+ Nowa</button>`;
+  if (!state.projects.length) {
+    view.innerHTML = `<div class="empty"><div class="big">🎤</div>Brak piosenek.<br>Dodaj nowy projekt.<br><br>
+      <button class="btn primary" data-act="new-project">+ Nowa piosenka</button></div>`;
+    return;
+  }
+  view.innerHTML = `<ul class="plist">${state.projects.map(p => {
+    const lines = p.sections.reduce((s, x) => s + x.lines.length, 0);
+    const meta = p.beatKey ? `${Math.round(p.bpm)} BPM · ${barCount(p)} taktów · ${lines} wersów` : 'Bez bitu';
+    return `<li class="${p.id === state.currentId ? 'cur' : ''}" data-act="open" data-id="${p.id}">
+      <div class="spacer"><div class="pname">${esc(p.name)}</div><div class="small muted">${meta}</div></div>
+      <button class="iconbtn" data-act="rename" data-id="${p.id}" aria-label="Zmień nazwę">✎</button>
+      <button class="iconbtn" data-act="del-project" data-id="${p.id}" aria-label="Usuń">${ICON.trash}</button></li>`;
+  }).join('')}</ul>`;
+}
+
+// ---------- Bit ----------
+function renderBeat(p) {
+  titleEl.textContent = p.name;
+  if (!p.beatKey) {
+    view.innerHTML = `<div class="empty"><div class="big">〰</div>
+      Dodaj bit, a aplikacja sama sprawdzi BPM i podzieli go na takty.<br><br>
+      <label class="btn primary">+ Dodaj bit<input type="file" accept="audio/*" data-act="beat-file" hidden></label>
+      ${state.analyzing ? '<p>Analizuję bit…</p>' : ''}</div>`;
+    return;
+  }
+  topAction.innerHTML = `<label class="btn small">Zmień bit<input type="file" accept="audio/*" data-act="beat-file" hidden></label>`;
+  const n = barCount(p);
+  const a = state.sel ? Math.min(state.sel.a, state.sel.b ?? state.sel.a) : null;
+  const b = state.sel ? Math.max(state.sel.a, state.sel.b ?? state.sel.a) : null;
+
+  view.innerHTML = `
+  <div class="card">
+    <h2>Bit</h2>
+    <div class="small muted">${esc(p.beatName)} · ${fmtTime(p.beatDuration)}</div>
+    <div class="row"><span>BPM</span><span class="spacer"></span>
+      <button class="btn icon" data-act="bpm" data-d="-0.5">−</button>
+      <input type="number" step="0.1" inputmode="decimal" value="${p.bpm}" data-act="bpm-input" style="width:80px;text-align:center">
+      <button class="btn icon" data-act="bpm" data-d="0.5">+</button></div>
+    <div class="row"><span>Tempo</span><span class="spacer"></span>
+      <button class="btn small" data-act="bpm-mul" data-m="0.5">÷2</button>
+      <button class="btn small" data-act="bpm-mul" data-m="2">×2</button></div>
+    <div class="row"><span>Początek taktu 1</span><span class="spacer"></span>
+      <button class="btn icon" data-act="down" data-d="-0.01">‹</button>
+      <span style="width:64px;text-align:center" class="small">${p.firstDownbeat.toFixed(2)} s</span>
+      <button class="btn icon" data-act="down" data-d="0.01">›</button></div>
+    <div class="row"><button class="btn small" data-act="down-beat">Przesuń „jedynkę” o 1 bit</button>
+      <span class="spacer"></span>
+      <button class="btn small" data-act="reanalyze" ${state.analyzing ? 'disabled' : ''}>${state.analyzing ? 'Analizuję…' : 'Wykryj ponownie'}</button></div>
+    <div class="row small muted">${n} taktów · metrum ${p.beatsPerBar}/4</div>
+  </div>
+
+  <div class="card">
+    <h2>Takty</h2>
+    <div class="bars">${Array.from({ length: n }, (_, i) => {
+      const bar = i + 1, s = sectionAt(p, bar);
+      const sel = a != null && bar >= a && bar <= b;
+      return `<div class="bar ${s ? 'k-' + s.kind : ''} ${sel ? 'sel' : ''}" data-act="bar" data-bar="${bar}">${bar}</div>`;
+    }).join('')}</div>
+    ${a != null ? `
+      <div class="row" style="margin-top:10px"><b>Zaznaczone: ${a}–${b}</b> <span class="muted small">(${b - a + 1} taktów)</span>
+        <span class="spacer"></span><button class="iconbtn" data-act="sel-clear">✕</button></div>
+      <div class="kinds">${KINDS.map(([k, l]) => `<button class="chip k-${k}" data-act="mark" data-kind="${k}">${l}</button>`).join('')}
+        <button class="chip" style="background:var(--panel2);color:var(--text)" data-act="unmark">Wyczyść</button></div>`
+      : `<p class="small muted" style="margin:10px 0 0">Stuknij pierwszy i ostatni takt sekcji, potem wybierz typ. Każdy takt to jeden wers w zakładce Tekst.</p>`}
+  </div>
+
+  <div class="card seclist">
+    <h2>Sekcje</h2>
+    ${p.sections.length ? p.sections.map(s => `
+      <div class="row"><span class="dot k-${s.kind}"></span><b>${secTitle(s)}</b><span class="spacer"></span>
+      <span class="small muted">takty ${s.startBar}–${s.endBar} · ${s.lines.length} wersów</span>
+      <button class="iconbtn" data-act="del-section" data-id="${s.id}">${ICON.trash}</button></div>`).join('')
+      : '<div class="muted small">Brak oznaczonych sekcji.</div>'}
+  </div>
+
+  <div class="card">
+    <h2>Nagrywanie</h2>
+    ${p.tracks.map(t => trackHTML(p, t)).join('')}
+    <div class="row" style="margin-top:10px"><button class="btn small" data-act="add-track">+ Nowa ścieżka</button></div>
+    <div class="row wrap" style="margin-top:12px">
+      <span class="small">Mikrofon</span>
+      <select data-act="mic" style="flex:1;min-width:0">
+        <option value="">Domyślny (iPhone)</option>
+        ${state.inputs.map(d => `<option value="${esc(d.deviceId)}" ${d.deviceId === state.micId ? 'selected' : ''}>${esc(d.label || 'Mikrofon')}</option>`).join('')}
+      </select>
+      <button class="btn small" data-act="mic-refresh">Odśwież</button>
+    </div>
+    ${state.micLabel ? `<div class="small muted" style="margin-top:6px">Ostatnio nagrywano: ${esc(state.micLabel)}</div>` : ''}
+    <div class="notice" style="margin-top:10px">Muzyka leci na słuchawki, jeśli są podłączone. W przeglądarce iPhone może przełączyć nagrywanie na mikrofon słuchawek (AirPods, słuchawki z mikrofonem) – wybierz wtedy „iPhone Mikrofon” powyżej. Najpewniej działa ze słuchawkami przewodowymi bez mikrofonu.</div>
+  </div>
+
+  <div class="card">
+    <h2>Latencja</h2>
+    <div class="row"><span>Korekta nagrań</span><span class="spacer"></span><b>${Math.round(state.latencyMs)} ms</b></div>
+    <div class="row"><button class="btn" data-act="latency">Test latencji</button></div>
+  </div>`;
+}
+
+function trackHTML(p, t) {
+  const rec = engine.recording && state.recTrackId === t.id;
+  return `<div class="track" data-track="${t.id}">
+    <div class="row">
+      <input type="text" value="${esc(t.name)}" data-act="track-name" data-id="${t.id}">
+      <button class="iconbtn ${t.muted ? '' : 'on'}" data-act="mute" data-id="${t.id}">${t.muted ? '🔇' : '🔊'}</button>
+      <button class="recbtn ${rec ? 'on' : ''}" data-act="record" data-id="${t.id}">${rec ? '■' : '●'}</button>
+      <button class="iconbtn" data-act="del-track" data-id="${t.id}">${ICON.trash}</button>
+    </div>
+    <div class="row"><span class="small muted">Głośność</span><input type="range" min="0" max="1.5" step="0.05" value="${t.volume}" data-act="vol" data-id="${t.id}"></div>
+    ${t.takes.map(k => `<div class="take">● Nagranie od taktu ${barAt(p, k.startTime)}<span class="spacer"></span>
+      <button class="iconbtn" data-act="del-take" data-id="${t.id}" data-take="${k.id}">${ICON.trash}</button></div>`).join('')}
+  </div>`;
+}
+
+// ---------- Tekst ----------
+function renderLyrics(p) {
+  titleEl.textContent = p.name;
+  topAction.innerHTML = `<button class="btn small ${state.follow ? 'primary' : ''}" data-act="follow">Śledź ${state.follow ? '✓' : ''}</button>`;
+  if (!p.sections.length) {
+    view.innerHTML = `<div class="empty"><div class="big">≡</div>Brak sekcji.<br>W zakładce Bit zaznacz takty i oznacz je jako intro, zwrotkę, refren…</div>`;
+    return;
+  }
+  view.innerHTML = p.sections.map(s => `
+    <section class="lsec">
+      <div class="lsec-h"><span class="dot k-${s.kind}"></span>${secTitle(s)}<span class="spacer"></span>
+        <span class="small muted">${s.lines.length} wersów</span></div>
+      ${s.lines.map((l, i) => lineHTML(s, l, i)).join('')}
+    </section>`).join('');
+  view.querySelectorAll('textarea').forEach(autoSize);
+}
+
+function lineHTML(s, l, i) {
+  const bar = s.startBar + i;
+  return `<div class="line" data-line-bar="${bar}" data-sec="${s.id}" data-line="${l.id}">
+    <div class="lnum"><span class="abs">${bar}</span><span class="rel">${i + 1}</span></div>
+    <div class="versions">
+      ${l.versions.map(v => v.visible ? `
+        <div class="ver"><textarea rows="1" placeholder="Wers ${i + 1}…" data-act="text" data-v="${v.id}">${esc(v.text)}</textarea>
+          <button class="iconbtn" data-act="eye" data-v="${v.id}" aria-label="Ukryj">${ICON.eye}</button>
+          <button class="iconbtn" data-act="del-ver" data-v="${v.id}" aria-label="Usuń">${ICON.trash}</button></div>` : `
+        <div class="ver hidden"><div class="ghost">${esc(v.text) || 'ukryta wersja'}</div>
+          <button class="iconbtn" data-act="eye" data-v="${v.id}" aria-label="Pokaż">${ICON.eyeOff}</button>
+          <button class="iconbtn" data-act="del-ver" data-v="${v.id}" aria-label="Usuń">${ICON.trash}</button></div>`).join('')}
+      <button class="addver" data-act="add-ver">＋ wersja</button>
+    </div>
+  </div>`;
+}
+
+function autoSize(t) { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }
+
+// ---------- Transport ----------
+function barOptions(p, selected) {
+  const n = Math.max(1, barCount(p));
+  let html = '';
+  for (let b = 1; b <= n; b++) {
+    const s = sectionAt(p, b);
+    const label = s ? `${b} · ${secTitle(s)} ${b - s.startBar + 1}` : `${b}`;
+    html += `<option value="${b}" ${b === selected ? 'selected' : ''}>${label}</option>`;
+  }
+  return html;
+}
+
+function renderTransport(p) {
+  const loop = p.playMode === 'loop';
+  transport.innerHTML = `
+    <div class="row tbars">
+      <div class="seg"><button class="${loop ? '' : 'on'}" data-act="mode" data-m="long">Long</button>
+        <button class="${loop ? 'on' : ''}" data-act="mode" data-m="loop">Pętla</button></div>
+      ${loop
+        ? `<select data-act="loop-a">${barOptions(p, p.loopStartBar)}</select><span class="muted">–</span><select data-act="loop-b">${barOptions(p, p.loopEndBar)}</select>`
+        : `<span class="small muted">od</span><select data-act="long-a">${barOptions(p, p.longStartBar)}</select>`}
+      <span class="spacer"></span><span id="tbar"></span>
+    </div>
+    <div class="tbtns">
+      <button class="btn primary start ${engine.playing ? 'playing' : ''}" data-act="start">▶ Start</button>
+      <button class="btn" data-act="stop">■ Stop</button>
+    </div>`;
+}
+
+// ---------- playhead ----------
+let lastBar = null;
+function updatePlayhead(force = false) {
+  const p = cur();
+  const tb = document.getElementById('tbar');
+  if (!p || !p.beatKey) return;
+  const bar = engine.playing ? barAt(p, engine.position) : null;
+  if (tb) tb.textContent = engine.playing ? `T${bar}` : '';
+  if (bar === lastBar && !force) return;
+  lastBar = bar;
+  view.querySelectorAll('.now').forEach(e => e.classList.remove('now'));
+  if (bar == null) return;
+  const cell = view.querySelector(`.bar[data-bar="${bar}"]`);
+  if (cell) cell.classList.add('now');
+  const line = view.querySelector(`.line[data-line-bar="${bar}"]`);
+  if (line) {
+    line.classList.add('now');
+    if (state.follow && state.tab === 'lyrics' && !force && !line.contains(document.activeElement)) {
+      line.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+}
+(function loop() { if (engine.playing) updatePlayhead(); requestAnimationFrame(loop); })();
+engine.onStateChange = () => {
+  const s = transport.querySelector('.start');
+  if (s) s.classList.toggle('playing', engine.playing);
+  if (!engine.playing) updatePlayhead(true);
+};
+
+// ---------- akcje audio ----------
+async function takesFor(p, extraSkipTrack) {
+  const out = [];
+  for (const t of p.tracks) {
+    if (t.muted) continue;
+    for (const k of t.takes) {
+      const buffer = await getBuffer(k.key);
+      if (buffer) out.push({ buffer, position: k.startTime - state.latencyMs / 1000, volume: t.volume });
+    }
+  }
+  return out;
+}
+
+async function startPlayback() {
+  const p = cur();
+  await engine.unlock();
+  const beat = await getBuffer(p.beatKey);
+  const takes = await takesFor(p);
+  if (p.playMode === 'loop') {
+    const a = Math.min(p.loopStartBar, p.loopEndBar), b = Math.max(p.loopStartBar, p.loopEndBar);
+    engine.play({ beat, pos: timeOfBar(p, a), loop: [timeOfBar(p, a), timeOfBar(p, b + 1)], takes });
+  } else {
+    engine.play({ beat, pos: timeOfBar(p, p.longStartBar), takes });
+  }
+}
+
+async function toggleRecord(trackId) {
+  const p = cur();
+  if (engine.recording) { engine.stop(); return; }
+  await engine.unlock();
+  const beat = await getBuffer(p.beatKey);
+  const takes = await takesFor(p);
+  let pos, stopAt = null;
+  if (p.playMode === 'loop') {
+    const a = Math.min(p.loopStartBar, p.loopEndBar), b = Math.max(p.loopStartBar, p.loopEndBar);
+    pos = timeOfBar(p, a); stopAt = Math.min(timeOfBar(p, b + 1), p.beatDuration);
+  } else pos = timeOfBar(p, p.longStartBar);
+  state.recTrackId = trackId;
+  try {
+    await engine.record({
+      beat, pos, stopAt, takes, deviceId: state.micId,
+      onDone: async ({ buffer, blob, startPos }) => {
+        const key = 'take-' + uid();
+        await db.putBlob(key, blob);
+        buffers.set(key, buffer);
+        const t = p.tracks.find(x => x.id === trackId);
+        if (t) t.takes.push({ id: uid(), key, startTime: startPos });
+        state.recTrackId = null;
+        save(p);
+        if (state.tab === 'beat') render();
+      },
+    });
+    state.micLabel = engine.stream?.getAudioTracks()[0]?.label || '';
+    refreshInputs();
+  } catch (e) {
+    state.recTrackId = null;
+    alert('Brak dostępu do mikrofonu: ' + e.message);
+  }
+  render();
+}
+
+async function refreshInputs() {
+  state.inputs = await engine.listInputs();
+  if (state.tab === 'beat') {
+    const sel = view.querySelector('select[data-act="mic"]');
+    if (sel) render();
+  }
+}
+
+async function importBeat(file) {
+  const p = cur();
+  engine.stop();
+  state.analyzing = true; render();
+  try {
+    const key = 'beat-' + uid();
+    await db.putBlob(key, file);
+    const buffer = await engine.decode(file);
+    if (p.beatKey) { db.deleteBlob(p.beatKey); buffers.delete(p.beatKey); }
+    buffers.set(key, buffer);
+    p.beatKey = key; p.beatName = file.name; p.beatDuration = buffer.duration;
+    await analyze(p, buffer);
+  } catch (e) {
+    alert('Nie udało się wczytać pliku: ' + e.message);
+  }
+  state.analyzing = false;
+  save(p); render();
+}
+
+async function analyze(p, buffer) {
+  await new Promise(r => setTimeout(r, 30));
+  const r = analyzeBeat(buffer);
+  p.bpm = r.bpm; p.firstDownbeat = r.firstBeat;
+  clampSections(p);
+  if (p.loopEndBar > barCount(p)) p.loopEndBar = Math.min(4, barCount(p));
+}
+
+function clampSections(p) {
+  const n = barCount(p);
+  p.sections = p.sections.filter(s => s.startBar <= n);
+  p.sections.forEach(s => { s.endBar = Math.min(s.endBar, n); syncLines(s); });
+}
+
+// ---------- sekcje ----------
+function markSection(p, kind) {
+  const lo = Math.min(state.sel.a, state.sel.b ?? state.sel.a);
+  const hi = Math.max(state.sel.a, state.sel.b ?? state.sel.a);
+  const out = [];
+  for (const s of p.sections) {
+    if (s.endBar < lo || s.startBar > hi) { out.push(s); continue; }
+    if (s.startBar < lo) {
+      const left = { ...s, id: uid(), endBar: lo - 1, lines: s.lines.slice(0, lo - s.startBar) };
+      syncLines(left); out.push(left);
+    }
+    if (s.endBar > hi) {
+      const right = { ...s, id: uid(), startBar: hi + 1, lines: s.lines.slice(hi + 1 - s.startBar) };
+      syncLines(right); out.push(right);
+    }
+  }
+  if (kind) {
+    const ns = { id: uid(), kind, number: 1, startBar: lo, endBar: hi, lines: [] };
+    syncLines(ns); out.push(ns);
+  }
+  out.sort((x, y) => x.startBar - y.startBar);
+  const cnt = {};
+  out.forEach(s => { cnt[s.kind] = (cnt[s.kind] || 0) + 1; s.number = cnt[s.kind]; });
+  p.sections = out;
+  state.sel = null;
+}
+
+// ---------- test latencji ----------
+const modal = $('#modal');
+const lt = { take: null, beatEnv: [], takeEnv: [], offset: 0 };
+
+function latencyWindow(p) {
+  const s = timeOfBar(p, 1);
+  return [s, Math.min(timeOfBar(p, 5), p.beatDuration)];
+}
+
+function openLatency() {
+  lt.offset = state.latencyMs;
+  renderLatency();
+  modal.hidden = false;
+}
+
+function renderLatency() {
+  modal.innerHTML = `<div class="sheet">
+    <div class="row"><h3>Test latencji</h3><span class="spacer"></span>
+      <button class="btn small" data-act="lt-close">Zamknij</button></div>
+    <ol class="steps small">
+      <li>Załóż słuchawki.</li>
+      <li>Stuknij „Nagraj test” – zagrają 4 takty od początku bitu.</li>
+      <li>Rób beatbox na werbel razem z bitem.</li>
+      <li>Przesuń nagranie (czerwone), aż werble pokryją się z bitem (niebieski), i zapisz.</li>
+    </ol>
+    <div class="row"><button class="btn primary" data-act="lt-rec" ${engine.recording ? 'disabled' : ''}>${engine.recording ? 'Nagrywam…' : '● Nagraj test'}</button></div>
+    ${lt.take ? `
+      <canvas class="wave" id="ltc" style="margin-top:12px"></canvas>
+      <div class="row" style="margin-top:10px"><span>Przesunięcie</span><span class="spacer"></span><span class="big-ms" id="ltms">${Math.round(lt.offset)} ms</span></div>
+      <input type="range" min="-100" max="500" step="1" value="${lt.offset}" data-act="lt-slider">
+      <div class="row">${[-10, -1, 1, 10].map(d => `<button class="btn" style="flex:1" data-act="lt-nudge" data-d="${d}">${d > 0 ? '+' + d : d}</button>`).join('')}</div>
+      <div class="row"><button class="btn" data-act="lt-auto">✨ Dopasuj automatycznie</button></div>
+      <div class="row"><button class="btn" style="flex:1" data-act="lt-play">▶ Odsłuchaj</button>
+        <button class="btn" style="flex:1" data-act="stop">■ Stop</button></div>
+      <div class="row"><button class="btn primary" style="flex:1" data-act="lt-save">Zapisz latencję</button></div>` : ''}
+    <p class="small muted">Aktualna latencja: ${Math.round(state.latencyMs)} ms. Zrób test osobno dla słuchawek przewodowych i Bluetooth.</p>
+  </div>`;
+  drawLatency();
+}
+
+function drawLatency() {
+  const c = document.getElementById('ltc');
+  if (!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  c.width = c.clientWidth * dpr; c.height = c.clientHeight * dpr;
+  const g = c.getContext('2d');
+  const W = c.width, H = c.height, h = H / 2;
+  const shift = Math.round(lt.offset);
+  const n = Math.max(1, lt.beatEnv.length);
+  const draw = (env, off, y0, col) => {
+    const peak = Math.max(...env, 1e-4);
+    g.strokeStyle = col; g.lineWidth = 1; g.beginPath();
+    for (let x = 0; x < W; x++) {
+      const i = Math.floor(x / W * n);
+      const step = Math.max(1, Math.floor(n / W));
+      let m = 0;
+      for (let k = i; k < i + step; k++) { const j = k + off; if (j >= 0 && j < env.length && env[j] > m) m = env[j]; }
+      const v = m / peak * h * 0.45;
+      g.moveTo(x, y0 + h / 2 - v); g.lineTo(x, y0 + h / 2 + v);
+    }
+    g.stroke();
+  };
+  g.clearRect(0, 0, W, H);
+  draw(lt.beatEnv, 0, 0, '#3d8bff');
+  draw(lt.takeEnv, shift, h, '#ff5a36');
+  // linie taktów/beatów
+  const p = cur(); const beatMs = 60000 / p.bpm;
+  g.strokeStyle = 'rgba(128,128,128,.35)';
+  for (let t = 0; t < n; t += beatMs) { const x = t / n * W; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+}
+
+async function latencyRecord() {
+  const p = cur();
+  await engine.unlock();
+  const beat = await getBuffer(p.beatKey);
+  const [s, e] = latencyWindow(p);
+  try {
+    await engine.record({
+      beat, pos: s, stopAt: e, takes: [], deviceId: state.micId,
+      onDone: ({ buffer, startPos }) => {
+        lt.take = { buffer, startPos };
+        lt.beatEnv = envelope(beat, s, e - s, 1000);
+        const raw = envelope(buffer, 0, e - s + 1, 1000);
+        const lead = Math.round((startPos - s) * 1000);
+        lt.takeEnv = lead >= 0 ? new Array(lead).fill(0).concat(raw) : raw.slice(-lead);
+        renderLatency();
+      },
+    });
+  } catch (err) { alert('Brak dostępu do mikrofonu: ' + err.message); }
+  renderLatency();
+}
+
+async function latencyPlay() {
+  const p = cur();
+  await engine.unlock();
+  const beat = await getBuffer(p.beatKey);
+  const [s, e] = latencyWindow(p);
+  engine.play({ beat, pos: s, loop: [s, e], takes: [{ buffer: lt.take.buffer, position: lt.take.startPos - lt.offset / 1000, volume: 1 }] });
+}
+
+function setOffset(v) {
+  lt.offset = Math.max(-100, Math.min(500, v));
+  const ms = document.getElementById('ltms'); if (ms) ms.textContent = `${Math.round(lt.offset)} ms`;
+  const sl = modal.querySelector('[data-act="lt-slider"]'); if (sl) sl.value = lt.offset;
+  drawLatency();
+}
+
+// ---------- obsługa zdarzeń ----------
+function findVersion(p, el) {
+  const line = el.closest('.line');
+  const s = p.sections.find(x => x.id === line.dataset.sec);
+  const l = s.lines.find(x => x.id === line.dataset.line);
+  const v = el.dataset.v ? l.versions.find(x => x.id === el.dataset.v) : null;
+  return { s, l, v, lineEl: line };
+}
+
+function rerenderLine(lineEl, s, l) {
+  const i = s.lines.indexOf(l);
+  lineEl.outerHTML = lineHTML(s, l, i);
+  const fresh = view.querySelector(`.line[data-line="${l.id}"]`);
+  fresh.querySelectorAll('textarea').forEach(autoSize);
+  return fresh;
+}
+
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) {
+    const tab = e.target.closest('#tabs button');
+    if (tab && !tab.disabled) setTab(tab.dataset.tab);
+    return;
+  }
+  const act = el.dataset.act;
+  const p = cur();
+  switch (act) {
+    case 'new-project': {
+      const name = prompt('Nazwa piosenki', '');
+      if (name === null) return;
+      const np = newProject(name.trim());
+      state.projects.unshift(np); await db.putProject(np);
+      openProject(np.id, 'beat');
+      return;
+    }
+    case 'open': if (e.target.closest('.iconbtn')) return; openProject(el.dataset.id, 'beat'); return;
+    case 'rename': {
+      const pr = state.projects.find(x => x.id === el.dataset.id);
+      const name = prompt('Nowa nazwa', pr.name);
+      if (name) { pr.name = name.trim(); save(pr); render(); }
+      return;
+    }
+    case 'del-project': {
+      const pr = state.projects.find(x => x.id === el.dataset.id);
+      if (!confirm(`Usunąć „${pr.name}” razem z nagraniami?`)) return;
+      if (pr.id === state.currentId) { engine.stop(); state.currentId = null; localStorage.removeItem('currentId'); }
+      if (pr.beatKey) db.deleteBlob(pr.beatKey);
+      pr.tracks.forEach(t => t.takes.forEach(k => db.deleteBlob(k.key)));
+      await db.deleteProject(pr.id);
+      state.projects = state.projects.filter(x => x !== pr);
+      setTab('projects');
+      return;
+    }
+    case 'bpm': p.bpm = Math.max(40, Math.min(240, Math.round((p.bpm + Number(el.dataset.d)) * 10) / 10)); clampSections(p); save(); render(); return;
+    case 'bpm-mul': p.bpm = Math.round(p.bpm * Number(el.dataset.m) * 10) / 10; clampSections(p); save(); render(); return;
+    case 'down': nudgeDown(p, Number(el.dataset.d)); return;
+    case 'down-beat': nudgeDown(p, barDur(p) / p.beatsPerBar); return;
+    case 'reanalyze': {
+      state.analyzing = true; render();
+      await analyze(p, await getBuffer(p.beatKey));
+      state.analyzing = false; save(); render(); return;
+    }
+    case 'bar': {
+      const b = Number(el.dataset.bar);
+      if (!state.sel || state.sel.b != null) state.sel = { a: b, b: null };
+      else state.sel.b = b;
+      render(); return;
+    }
+    case 'sel-clear': state.sel = null; render(); return;
+    case 'mark': markSection(p, el.dataset.kind); save(); render(); return;
+    case 'unmark': markSection(p, null); save(); render(); return;
+    case 'del-section': p.sections = p.sections.filter(s => s.id !== el.dataset.id); state.sel = null; markRenumber(p); save(); render(); return;
+    case 'add-track': p.tracks.push({ id: uid(), name: `Ścieżka ${p.tracks.length + 1}`, muted: false, volume: 1, takes: [] }); save(); render(); return;
+    case 'mute': { const t = p.tracks.find(x => x.id === el.dataset.id); t.muted = !t.muted; save(); render(); return; }
+    case 'record': toggleRecord(el.dataset.id); return;
+    case 'del-track': {
+      const t = p.tracks.find(x => x.id === el.dataset.id);
+      if (t.takes.length && !confirm(`Usunąć „${t.name}” z nagraniami?`)) return;
+      t.takes.forEach(k => db.deleteBlob(k.key));
+      p.tracks = p.tracks.filter(x => x !== t); save(); render(); return;
+    }
+    case 'del-take': {
+      const t = p.tracks.find(x => x.id === el.dataset.id);
+      const k = t.takes.find(x => x.id === el.dataset.take);
+      db.deleteBlob(k.key); buffers.delete(k.key);
+      t.takes = t.takes.filter(x => x !== k); save(); render(); return;
+    }
+    case 'mic-refresh': {
+      // jednorazowe zapytanie o mikrofon, żeby poznać nazwy urządzeń
+      try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); } catch (_) {}
+      await refreshInputs(); render(); return;
+    }
+    case 'latency': openLatency(); return;
+    case 'follow': state.follow = !state.follow; render(); return;
+    case 'eye': {
+      const { s, l, v, lineEl } = findVersion(p, el);
+      v.visible = !v.visible; save(); rerenderLine(lineEl, s, l); return;
+    }
+    case 'del-ver': {
+      const { s, l, v, lineEl } = findVersion(p, el);
+      if (v.text && !confirm('Usunąć tę wersję wersu?')) return;
+      l.versions = l.versions.filter(x => x !== v);
+      if (!l.versions.length) l.versions.push({ id: uid(), text: '', visible: true });
+      save(); rerenderLine(lineEl, s, l); return;
+    }
+    case 'add-ver': {
+      const { s, l, lineEl } = findVersion(p, el);
+      const nv = { id: uid(), text: '', visible: true };
+      l.versions.push(nv); save();
+      const fresh = rerenderLine(lineEl, s, l);
+      const ta = fresh.querySelector(`textarea[data-v="${nv.id}"]`); if (ta) ta.focus();
+      return;
+    }
+    case 'mode': p.playMode = el.dataset.m; save(); renderTransport(p); return;
+    case 'start': startPlayback(); return;
+    case 'stop': engine.stop(); if (state.tab === 'beat') render(); return;
+    // test latencji
+    case 'lt-close': engine.stop(); modal.hidden = true; render(); return;
+    case 'lt-rec': latencyRecord(); return;
+    case 'lt-nudge': setOffset(lt.offset + Number(el.dataset.d)); return;
+    case 'lt-auto': setOffset(autoLatency(lt.beatEnv, lt.takeEnv)); return;
+    case 'lt-play': latencyPlay(); return;
+    case 'lt-save': state.latencyMs = lt.offset; localStorage.setItem('latencyMs', String(lt.offset)); engine.stop(); modal.hidden = true; render(); return;
+  }
+});
+
+document.addEventListener('input', e => {
+  const el = e.target, act = el.dataset.act, p = cur();
+  if (!act || !p) return;
+  if (act === 'text') { const { v } = findVersion(p, el); v.text = el.value; autoSize(el); save(); }
+  else if (act === 'track-name') { p.tracks.find(x => x.id === el.dataset.id).name = el.value; save(); }
+  else if (act === 'vol') { p.tracks.find(x => x.id === el.dataset.id).volume = Number(el.value); save(); }
+  else if (act === 'lt-slider') setOffset(Number(el.value));
+});
+
+document.addEventListener('change', e => {
+  const el = e.target, act = el.dataset.act, p = cur();
+  if (!act) return;
+  if (act === 'beat-file' && el.files[0]) importBeat(el.files[0]);
+  else if (act === 'bpm-input') { const v = Number(el.value); if (v >= 40 && v <= 240) { p.bpm = v; clampSections(p); save(); } render(); }
+  else if (act === 'long-a') { p.longStartBar = Number(el.value); save(); }
+  else if (act === 'loop-a') { p.loopStartBar = Number(el.value); save(); }
+  else if (act === 'loop-b') { p.loopEndBar = Number(el.value); save(); }
+  else if (act === 'mic') { state.micId = el.value; localStorage.setItem('micId', el.value); }
+});
+
+function nudgeDown(p, d) {
+  const bd = barDur(p);
+  let v = p.firstDownbeat + d;
+  if (v >= bd) v -= bd;
+  if (v < 0) v += bd;
+  p.firstDownbeat = Math.round(v * 1000) / 1000;
+  clampSections(p); save(); render();
+}
+
+function markRenumber(p) {
+  const cnt = {};
+  p.sections.forEach(s => { cnt[s.kind] = (cnt[s.kind] || 0) + 1; s.number = cnt[s.kind]; });
+}
+
+function openProject(id, tab) {
+  engine.stop();
+  state.currentId = id; state.sel = null;
+  localStorage.setItem('currentId', id);
+  setTab(tab);
+}
+
+const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+// ---------- start ----------
+(async function init() {
+  state.projects = (await db.allProjects()).sort((a, b) => b.created - a.created);
+  if (!cur()) state.currentId = null;
+  setTab(cur() ? 'lyrics' : 'projects');
+  refreshInputs();
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();

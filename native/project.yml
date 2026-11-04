@@ -1,0 +1,23 @@
+name: Wersy
+options:
+  bundleIdPrefix: com.kaizenkuba
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Wersy:
+    type: application
+    platform: iOS
+    sources: [Wersy]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kaizenkuba.wersy
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Mikrofon służy do nagrywania wokalu do bitu."
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
