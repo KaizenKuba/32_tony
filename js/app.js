@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { Engine } from './audio.js';
+import { Engine, encodeWav } from './audio.js';
 import { analyzeBeat, envelope, autoLatency } from './analyze.js';
 
 // ---------- model ----------
@@ -159,7 +159,8 @@ function renderBeat(p) {
     <div class="row"><button class="btn small" data-act="down-beat">Przesuń „jedynkę” o 1 bit</button>
       <span class="spacer"></span>
       <button class="btn small" data-act="reanalyze" ${state.analyzing ? 'disabled' : ''}>${state.analyzing ? 'Analizuję…' : 'Wykryj ponownie'}</button></div>
-    <div class="row small muted">${n} taktów · metrum ${p.beatsPerBar}/4</div>
+    <div class="row small muted">${n} taktów · metrum ${p.beatsPerBar}/4${p.beatEdited ? ' · bit przycięty' : ''}</div>
+    ${p.undo ? `<div class="row"><button class="btn small" data-act="undo-cut">↶ Cofnij ostatnie wycięcie (takty ${p.undo.a}–${p.undo.b})</button></div>` : ''}
   </div>
 
   <div class="card">
@@ -188,7 +189,8 @@ function renderBeat(p) {
       <div class="row" style="margin-top:10px"><b>Zaznaczone: ${a}–${b}</b> <span class="muted small">(${b - a + 1} taktów)</span>
         <span class="spacer"></span><button class="iconbtn" data-act="sel-clear">✕</button></div>
       <div class="kinds">${KINDS.map(([k, l]) => `<button class="chip k-${k}" data-act="mark" data-kind="${k}">${l}</button>`).join('')}
-        <button class="chip" style="background:var(--panel2);color:var(--text)" data-act="unmark">Wyczyść</button></div>`
+        <button class="chip" style="background:var(--panel2);color:var(--text)" data-act="unmark">Wyczyść</button></div>
+      <div class="row" style="margin-top:10px"><button class="btn danger" data-act="cut-bars" ${state.cutting ? 'disabled' : ''}>✂ ${state.cutting ? 'Wycinam…' : `Wytnij takty ${a}–${b} z bitu`}</button></div>`
       : `<p class="small muted" style="margin:10px 0 0">Stuknij pierwszy i ostatni takt sekcji, potem wybierz typ. Każdy takt to jeden wers w zakładce Tekst.</p>`}
   </div>
 
@@ -248,10 +250,10 @@ function renderLyrics(p) {
     return;
   }
   view.innerHTML = p.sections.map(s => `
-    <section class="lsec">
-      <div class="lsec-h"><span class="dot k-${s.kind}"></span>${secTitle(s)}<span class="spacer"></span>
-        <span class="small muted">${s.lines.length} wersów</span></div>
-      ${s.lines.map((l, i) => lineHTML(s, l, i)).join('')}
+    <section class="lsec ${s.collapsed ? 'collapsed' : ''}">
+      <div class="lsec-h" data-act="collapse" data-id="${s.id}"><span class="chev">${s.collapsed ? '▸' : '▾'}</span><span class="dot k-${s.kind}"></span>${secTitle(s)}<span class="spacer"></span>
+        <span class="small muted">${s.collapsed ? `takty ${s.startBar}–${s.endBar} · ` : ''}${s.lines.length} wersów</span></div>
+      ${s.collapsed ? '' : s.lines.map((l, i) => lineHTML(s, l, i)).join('')}
     </section>`).join('');
   view.querySelectorAll('textarea').forEach(autoSize);
 }
@@ -412,6 +414,7 @@ async function importBeat(file) {
     await db.putBlob(key, file);
     const buffer = await engine.decode(file);
     if (p.beatKey) { db.deleteBlob(p.beatKey); buffers.delete(p.beatKey); }
+    dropUndo(p); p.beatEdited = false;
     buffers.set(key, buffer);
     p.beatKey = key; p.beatName = file.name; p.beatDuration = buffer.duration;
     await analyze(p, buffer);
@@ -617,6 +620,7 @@ document.addEventListener('click', async e => {
       if (!confirm(`Usunąć „${pr.name}” razem z nagraniami?`)) return;
       if (pr.id === state.currentId) { engine.stop(); state.currentId = null; localStorage.removeItem('currentId'); }
       if (pr.beatKey) db.deleteBlob(pr.beatKey);
+      if (pr.undo) db.deleteBlob(pr.undo.beatKey);
       pr.tracks.forEach(t => t.takes.forEach(k => db.deleteBlob(k.key)));
       await db.deleteProject(pr.id);
       state.projects = state.projects.filter(x => x !== pr);
@@ -648,6 +652,12 @@ document.addEventListener('click', async e => {
       drawTimeline(); return;
     }
     case 'sel-clear': state.sel = null; render(); return;
+    case 'cut-bars': cutBars(p); return;
+    case 'undo-cut': undoCut(p); return;
+    case 'collapse': {
+      const s = p.sections.find(x => x.id === el.dataset.id);
+      s.collapsed = !s.collapsed; save(); render(); return;
+    }
     case 'mark': markSection(p, el.dataset.kind); save(); render(); return;
     case 'unmark': markSection(p, null); save(); render(); return;
     case 'del-section': p.sections = p.sections.filter(s => s.id !== el.dataset.id); state.sel = null; markRenumber(p); save(); render(); return;
@@ -736,6 +746,82 @@ function nudgeDown(p, d) {
   if (v < 0) v += bd;
   p.firstDownbeat = Math.round(v * 1000) / 1000;
   clampSections(p); save(); render();
+}
+
+// ---------- edycja bitu: wycinanie taktów ----------
+function dropUndo(p) {
+  if (p.undo) { db.deleteBlob(p.undo.beatKey); buffers.delete(p.undo.beatKey); p.undo = null; }
+}
+
+async function cutBars(p) {
+  const a = Math.min(state.sel.a, state.sel.b ?? state.sel.a);
+  const b = Math.max(state.sel.a, state.sel.b ?? state.sel.a);
+  const k = b - a + 1;
+  if (!confirm(`Wyciąć takty ${a}–${b} (${k}) z bitu?\nSekcje i nagrania za nimi przesuną się do przodu. Możesz to cofnąć.`)) return;
+  engine.stop();
+  state.cutting = true; render();
+  try {
+    const src = await getBuffer(p.beatKey);
+    const sr = src.sampleRate;
+    const t0 = Math.max(0, timeOfBar(p, a)), t1 = Math.min(src.duration, timeOfBar(p, b + 1));
+    const s0 = Math.round(t0 * sr), s1 = Math.round(t1 * sr);
+    const len = src.length - (s1 - s0);
+    const out = new AudioBuffer({ numberOfChannels: src.numberOfChannels, length: Math.max(1, len), sampleRate: sr });
+    const fade = Math.min(Math.round(sr * 0.006), s0, src.length - s1);
+    for (let c = 0; c < src.numberOfChannels; c++) {
+      const d = src.getChannelData(c), o = out.getChannelData(c);
+      o.set(d.subarray(0, s0), 0);
+      o.set(d.subarray(s1), s0);
+      // krótkie przenikanie na styku, żeby nie trzaskało
+      for (let i = 0; i < fade; i++) {
+        const g = i / fade;
+        o[s0 - fade + i] = d[s0 - fade + i] * (1 - g) + d[s1 - fade + i] * g;
+      }
+    }
+    const key = 'beat-' + uid();
+    await db.putBlob(key, encodeWav(out));
+    dropUndo(p);
+    p.undo = {
+      a, b, beatKey: p.beatKey, beatDuration: p.beatDuration, beatEdited: !!p.beatEdited,
+      sections: JSON.parse(JSON.stringify(p.sections)), tracks: JSON.parse(JSON.stringify(p.tracks)),
+      longStartBar: p.longStartBar, loopStartBar: p.loopStartBar, loopEndBar: p.loopEndBar,
+    };
+    buffers.set(key, out);
+    p.beatKey = key; p.beatDuration = out.duration; p.beatEdited = true;
+    // sekcje: usuń wycięte wersy, przesuń resztę
+    const secs = [];
+    for (const s of p.sections) {
+      const keep = [];
+      s.lines.forEach((l, i) => { const bar = s.startBar + i; if (bar < a || bar > b) keep.push(l); });
+      if (!keep.length) continue;
+      const start = s.startBar < a ? s.startBar : Math.max(a, s.startBar - k);
+      secs.push({ ...s, startBar: start, endBar: start + keep.length - 1, lines: keep });
+    }
+    p.sections = secs; markRenumber(p);
+    // nagrania za cięciem przesuwają się razem z bitem
+    const dt = t1 - t0;
+    p.tracks.forEach(t => t.takes.forEach(tk => { if (tk.startTime >= t1 - 0.05) tk.startTime -= dt; }));
+    const shift = x => x > b ? x - k : x >= a ? a : x;
+    const n = barCount(p);
+    p.longStartBar = Math.min(n, shift(p.longStartBar));
+    p.loopStartBar = Math.min(n, shift(p.loopStartBar));
+    p.loopEndBar = Math.min(n, Math.max(p.loopStartBar, shift(p.loopEndBar)));
+    clampSections(p);
+    state.sel = null;
+  } catch (e) { alert('Nie udało się wyciąć: ' + e.message); }
+  state.cutting = false;
+  save(p); render();
+}
+
+function undoCut(p) {
+  const u = p.undo; if (!u) return;
+  engine.stop();
+  db.deleteBlob(p.beatKey); buffers.delete(p.beatKey);
+  Object.assign(p, {
+    beatKey: u.beatKey, beatDuration: u.beatDuration, beatEdited: u.beatEdited, sections: u.sections, tracks: u.tracks,
+    longStartBar: u.longStartBar, loopStartBar: u.loopStartBar, loopEndBar: u.loopEndBar, undo: null,
+  });
+  save(p); render();
 }
 
 function markRenumber(p) {

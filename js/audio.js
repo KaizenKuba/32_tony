@@ -273,17 +273,19 @@ export class Engine {
 }
 
 export function encodeWav(buffer) {
-  const ch = buffer.getChannelData(0);
-  const sr = buffer.sampleRate;
-  const out = new DataView(new ArrayBuffer(44 + ch.length * 2));
+  const nc = buffer.numberOfChannels, sr = buffer.sampleRate, len = buffer.length;
+  const chans = Array.from({ length: nc }, (_, c) => buffer.getChannelData(c));
+  const bytes = len * nc * 2;
+  const out = new DataView(new ArrayBuffer(44 + bytes));
   const w = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)); };
-  w(0, 'RIFF'); out.setUint32(4, 36 + ch.length * 2, true); w(8, 'WAVE');
-  w(12, 'fmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
-  out.setUint32(24, sr, true); out.setUint32(28, sr * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true);
-  w(36, 'data'); out.setUint32(40, ch.length * 2, true);
-  for (let i = 0; i < ch.length; i++) {
-    const v = Math.max(-1, Math.min(1, ch[i]));
-    out.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+  w(0, 'RIFF'); out.setUint32(4, 36 + bytes, true); w(8, 'WAVE');
+  w(12, 'fmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, nc, true);
+  out.setUint32(24, sr, true); out.setUint32(28, sr * nc * 2, true); out.setUint16(32, nc * 2, true); out.setUint16(34, 16, true);
+  w(36, 'data'); out.setUint32(40, bytes, true);
+  let o = 44;
+  for (let i = 0; i < len; i++) for (let c = 0; c < nc; c++) {
+    const v = Math.max(-1, Math.min(1, chans[c][i]));
+    out.setInt16(o, v < 0 ? v * 0x8000 : v * 0x7fff, true); o += 2;
   }
   return new Blob([out], { type: 'audio/wav' });
 }
