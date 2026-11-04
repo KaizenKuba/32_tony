@@ -996,8 +996,8 @@ function drawTimeline(follow = false) {
     if (tt.textContent !== txt) tt.textContent = txt;
   }
   // playhead (miejsce startu)
-  if (p.cursor != null) {
-    const x = X(p.cursor);
+  if (p.beatKey) {
+    const x = X(startPos(p));
     if (x >= -8 && x <= cw + 8) {
       g.fillStyle = cssVar('--accent'); g.fillRect(x - 1, 0, 2, ch);
       g.beginPath(); g.moveTo(x - 7, 0); g.lineTo(x + 7, 0); g.lineTo(x, 10); g.closePath(); g.fill();
@@ -1086,7 +1086,7 @@ function bindTimeline(c) {
   c.addEventListener('pointerdown', e => {
     const p = cur();
     const t = timeAtX(e.clientX);
-    const nearCursor = p.cursor != null && Math.abs((p.cursor - t) * tl.pps) < 14;
+    const nearCursor = Math.abs((startPos(p) - t) * tl.pps) < 14;
     const sec = tl.mode === 'section' ? sectionAt(p, barAt(p, t)) : null;
     down = { x: e.clientX, y: e.clientY, start: tl.start, db: p.firstDownbeat, moved: false, id: e.pointerId,
       dragCursor: tl.mode === 'scroll' && nearCursor, sec };
