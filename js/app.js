@@ -131,11 +131,11 @@ function renderBeat(p) {
   if (!p.beatKey) {
     view.innerHTML = `<div class="empty"><div class="big">〰</div>
       Dodaj bit, a aplikacja sama sprawdzi BPM i podzieli go na takty.<br><br>
-      <label class="btn primary">+ Dodaj bit<input type="file" accept="audio/*,.mp3,audio/mpeg,.m4a,.wav,.aac,.aif,.aiff,.flac" data-act="beat-file" hidden></label>
+      <label class="btn primary">+ Dodaj bit<input type="file" data-act="beat-file" hidden></label>
       ${state.analyzing ? '<p>Analizuję bit…</p>' : ''}</div>`;
     return;
   }
-  topAction.innerHTML = `<label class="btn small">Zmień bit<input type="file" accept="audio/*,.mp3,audio/mpeg,.m4a,.wav,.aac,.aif,.aiff,.flac" data-act="beat-file" hidden></label>`;
+  topAction.innerHTML = `<label class="btn small">Zmień bit<input type="file" data-act="beat-file" hidden></label>`;
   const n = barCount(p);
   const a = state.sel ? Math.min(state.sel.a, state.sel.b ?? state.sel.a) : null;
   const b = state.sel ? Math.max(state.sel.a, state.sel.b ?? state.sel.a) : null;
