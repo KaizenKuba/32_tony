@@ -885,7 +885,13 @@ async function initTimeline() {
   drawTimeline();
 }
 
-function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+const cssCache = new Map();
+function cssVar(n) {
+  let v = cssCache.get(n);
+  if (v === undefined) { v = getComputedStyle(document.documentElement).getPropertyValue(n).trim(); cssCache.set(n, v); }
+  return v;
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { cssCache.clear(); tl.layerKey = null; drawTimeline(); });
 
 function drawTimeline(follow = false) {
   const c = tlCanvas();
@@ -908,6 +914,31 @@ function drawTimeline(follow = false) {
   const X = t => (t - t0) * tl.pps;
   const band = 20, wTop = band, wH = ch - band - 16;
 
+  // statyczna warstwa (przebieg, siatka, sekcje) rysowana tylko gdy coś się zmieni;
+  // co klatkę kopiujemy ją i dokładamy sam wskaźnik – żeby nie obciążać telefonu w trakcie grania
+  const key = [cw, ch, dpr, t0, tl.pps, tl.mode, p.bpm, p.firstDownbeat, p.beatKey, !!tl.peaks,
+    JSON.stringify(state.sel), p.sections.map(s => s.kind + s.startBar + '-' + s.endBar + s.number).join()].join('|');
+  if (!tl.layer) tl.layer = document.createElement('canvas');
+  if (tl.layerKey !== key) {
+    tl.layer.width = c.width; tl.layer.height = c.height;
+    const lg = tl.layer.getContext('2d');
+    lg.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawStatic(lg, p, cw, ch, t0, t1, X, band, wTop, wH);
+    tl.layerKey = key;
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, c.width, c.height);
+  g.drawImage(tl.layer, 0, 0);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // wskaźnik odtwarzania
+  if (engine.playing) {
+    const x = X(engine.position);
+    g.fillStyle = cssVar('--ok'); g.fillRect(x - 1, 0, 2, ch);
+  }
+}
+
+function drawStatic(g, p, cw, ch, t0, t1, X, band, wTop, wH) {
   g.clearRect(0, 0, cw, ch);
   g.fillStyle = cssVar('--panel2'); g.fillRect(0, 0, cw, ch);
 
@@ -971,11 +1002,6 @@ function drawTimeline(follow = false) {
     }
   }
 
-  // wskaźnik odtwarzania
-  if (engine.playing) {
-    const x = X(engine.position);
-    g.fillStyle = cssVar('--ok'); g.fillRect(x - 1, 0, 2, ch);
-  }
 }
 
 function bindTimeline(c) {
