@@ -101,6 +101,7 @@ function render() {
   topAction.innerHTML = '';
   if (state.tab === 'projects') renderProjects();
   else if (state.tab === 'beat') renderBeat(p);
+  else if (state.tab === 'notes') renderNotes(p);
   else renderLyrics(p);
   transport.hidden = state.tab === 'projects' || !p || !p.beatKey;
   if (!transport.hidden) renderTransport(p);
@@ -257,6 +258,12 @@ function trackHTML(p, t) {
     ${t.takes.map(k => `<div class="take">● Nagranie od taktu ${barAt(p, k.startTime)}<span class="spacer"></span>
       <button class="iconbtn" data-act="del-take" data-id="${t.id}" data-take="${k.id}">${ICON.trash}</button></div>`).join('')}
   </div>`;
+}
+
+// ---------- Notatnik ----------
+function renderNotes(p) {
+  titleEl.textContent = p.name;
+  view.innerHTML = `<textarea class="notes" data-act="notes" placeholder="Notatki, pomysły, linijki na później…">${esc(p.notes || '')}</textarea>`;
 }
 
 // ---------- Tekst ----------
@@ -754,6 +761,7 @@ document.addEventListener('input', e => {
   const el = e.target, act = el.dataset.act, p = cur();
   if (!act || !p) return;
   if (act === 'text') { const { v } = findVersion(p, el); v.text = el.value; autoSize(el); save(); }
+  else if (act === 'notes') { p.notes = el.value; save(); }
   else if (act === 'track-name') { p.tracks.find(x => x.id === el.dataset.id).name = el.value; save(); }
   else if (act === 'vol') { p.tracks.find(x => x.id === el.dataset.id).volume = Number(el.value); save(); }
   else if (act === 'lt-slider') setOffset(Number(el.value));

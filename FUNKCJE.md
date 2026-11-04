@@ -39,6 +39,9 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 - Zwijanie sekcji: stuknij nagłówek sekcji (np. puste intro), wersy znikają; stuknij znowu, żeby rozwinąć. Zapamiętuje się.
 - „Śledź”: podczas odtwarzania aktualny wers jest podświetlony i przewija się na środek.
 
+## Notatnik
+- Czwarta zakładka: wolna kartka do pisania, osobna dla każdej piosenki. Zapisuje się sama i synchronizuje z kontem. Bit można puszczać z dolnego paska.
+
 ## Transport (pasek na dole)
 - Start: odtwarza od razu.
 - Long: gra od wybranego taktu do końca.
