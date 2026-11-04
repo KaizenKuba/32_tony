@@ -2,10 +2,11 @@
 
 Stan na 4.11.2026. Link: https://kaizenkuba.github.io/32_tony/
 Aplikacja działa w Safari na iPhonie (PWA, „Dodaj do ekranu początkowego”) i na komputerze w przeglądarce.
-Dane zapisują się lokalnie w przeglądarce danego urządzenia (bez synchronizacji między urządzeniami).
+Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (Supabase).
 
 ## Projekty
 - Lista piosenek: dodaj nową, otwórz, zmień nazwę, usuń.
+- Synchronizacja: logowanie e-mailem i hasłem (Zaloguj / Załóż konto). Projekty, bity i nagrania są takie same na telefonie i komputerze. Zmiany wysyłają się same po chwili, a apka sprawdza nowości co 20 s i po powrocie do niej. Przycisk „Zapisz / odśwież” robi to od razu.
 - Przy każdej piosence: BPM, liczba taktów i wersów.
 
 ## Bit
@@ -46,5 +47,4 @@ Dane zapisują się lokalnie w przeglądarce danego urządzenia (bez synchroniza
 - Wskaźnik bieżącego taktu (T12).
 
 ## Pomysły na później
-- Synchronizacja projektów między telefonem i komputerem.
 - Eksport tekstu i miksu (wokal + bit).

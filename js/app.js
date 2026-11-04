@@ -1,6 +1,7 @@
 import { db } from './db.js';
 import { Engine, encodeWav } from './audio.js';
 import { analyzeBeat, envelope, autoLatency } from './analyze.js';
+import { cloud, loggedIn, signIn, signUp, signOut, syncAll, pushLater, fetchBlob } from './sync.js';
 
 // ---------- model ----------
 const KINDS = [
@@ -63,14 +64,16 @@ let saveTimer;
 function save(p = cur()) {
   if (!p) return;
   clearTimeout(saveTimer);
+  p.updated = Date.now();
   saveTimer = setTimeout(() => db.putProject(p), 250);
+  pushLater(p);
 }
 window.addEventListener('pagehide', () => { const p = cur(); if (p) db.putProject(p); });
 
 async function getBuffer(key) {
   if (!key) return null;
   if (buffers.has(key)) return buffers.get(key);
-  const blob = await db.getBlob(key);
+  const blob = (await db.getBlob(key)) || (await fetchBlob(key));
   if (!blob) return null;
   const b = await engine.decode(blob);
   buffers.set(key, b);
@@ -107,15 +110,30 @@ function render() {
 }
 
 // ---------- Projekty ----------
+function cloudHTML() {
+  if (!cloud.enabled) return '';
+  if (loggedIn()) return `<div class="card cloud"><div class="row"><span>☁︎</span><span class="spacer small">
+      <b>${esc(cloud.session.user?.email || '')}</b><br><span class="muted" id="cloudstatus">${esc(cloud.status)}</span></span>
+      <button class="btn small" data-act="sync-now" ${cloud.busy ? 'disabled' : ''}>Zapisz / odśwież</button>
+      <button class="btn small" data-act="logout">Wyloguj</button></div></div>`;
+  return `<div class="card cloud"><h2>Synchronizacja</h2>
+    <div class="small muted">Zaloguj się na telefonie i komputerze tym samym kontem, a projekty, bity i nagrania będą wszędzie te same.</div>
+    <input type="email" id="cl-email" placeholder="e-mail" autocomplete="username" style="width:100%;margin-top:10px">
+    <input type="password" id="cl-pass" placeholder="hasło (min. 6 znaków)" autocomplete="current-password" style="width:100%;margin-top:8px">
+    <div class="row" style="margin-top:10px"><button class="btn primary" data-act="login">Zaloguj</button>
+      <button class="btn" data-act="signup">Załóż konto</button></div>
+    ${cloud.status ? `<div class="small muted" style="margin-top:6px">${esc(cloud.status)}</div>` : ''}</div>`;
+}
+
 function renderProjects() {
   titleEl.textContent = 'Projekty';
   topAction.innerHTML = `<button class="btn small primary" data-act="new-project">+ Nowa</button>`;
   if (!state.projects.length) {
-    view.innerHTML = `<div class="empty"><div class="big">🎤</div>Brak piosenek.<br>Dodaj nowy projekt.<br><br>
+    view.innerHTML = cloudHTML() + `<div class="empty"><div class="big">🎤</div>Brak piosenek.<br>Dodaj nowy projekt.<br><br>
       <button class="btn primary" data-act="new-project">+ Nowa piosenka</button></div>`;
     return;
   }
-  view.innerHTML = `<ul class="plist">${state.projects.map(p => {
+  view.innerHTML = cloudHTML() + `<ul class="plist">${state.projects.map(p => {
     const lines = p.sections.reduce((s, x) => s + x.lines.length, 0);
     const meta = p.beatKey ? `${Math.round(p.bpm)} BPM · ${barCount(p)} taktów · ${lines} wersów` : 'Bez bitu';
     return `<li class="${p.id === state.currentId ? 'cur' : ''}" data-act="open" data-id="${p.id}">
@@ -604,7 +622,7 @@ document.addEventListener('click', async e => {
       const name = prompt('Nazwa piosenki', '');
       if (name === null) return;
       const np = newProject(name.trim());
-      state.projects.unshift(np); await db.putProject(np);
+      np.updated = Date.now(); state.projects.unshift(np); await db.putProject(np); pushLater(np);
       openProject(np.id, 'beat');
       return;
     }
@@ -623,6 +641,7 @@ document.addEventListener('click', async e => {
       if (pr.undo) db.deleteBlob(pr.undo.beatKey);
       pr.tracks.forEach(t => t.takes.forEach(k => db.deleteBlob(k.key)));
       await db.deleteProject(pr.id);
+      pr.updated = Date.now(); pushLater(pr, true);
       state.projects = state.projects.filter(x => x !== pr);
       setTab('projects');
       return;
@@ -653,6 +672,18 @@ document.addEventListener('click', async e => {
     }
     case 'sel-clear': state.sel = null; render(); return;
     case 'cut-bars': cutBars(p); return;
+    case 'login': case 'signup': {
+      const email = $('#cl-email').value.trim(), pass = $('#cl-pass').value;
+      if (!email || pass.length < 6) { alert('Podaj e-mail i hasło (min. 6 znaków).'); return; }
+      el.disabled = true;
+      try {
+        if (act === 'login') await signIn(email, pass);
+        else if (!(await signUp(email, pass))) alert('Konto założone. Kliknij link w mailu, który przyszedł, a potem zaloguj się tutaj.');
+      } catch (e) { alert('Nie udało się: ' + e.message); }
+      await reloadProjects(); render(); return;
+    }
+    case 'logout': if (confirm('Wylogować? Projekty zostaną na tym urządzeniu.')) { signOut(); render(); } return;
+    case 'sync-now': { const q = cur(); if (q) await db.putProject(q); await syncAll(); await reloadProjects(); render(); return; }
     case 'undo-cut': undoCut(p); return;
     case 'collapse': {
       const s = p.sections.find(x => x.id === el.dataset.id);
@@ -1058,10 +1089,32 @@ window.addEventListener('resize', () => drawTimeline());
 const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 // ---------- start ----------
+async function reloadProjects() {
+  state.projects = (await db.allProjects()).sort((a, b) => b.created - a.created);
+  if (!cur()) { state.currentId = null; if (state.tab !== 'projects') setTab('projects'); }
+}
+
+// zmiany z chmury: przeładuj, ale nie przeszkadzaj w pisaniu ani nagrywaniu
+let cloudDirty = false;
+cloud.onChange = async () => {
+  const typing = document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName);
+  if (engine.recording || typing) { cloudDirty = true; return; }
+  cloudDirty = false;
+  await reloadProjects(); render();
+};
+cloud.onStatus = () => {
+  const el = document.getElementById('cloudstatus');
+  if (el) el.textContent = cloud.status; else if (state.tab === 'projects') render();
+};
+document.addEventListener('focusout', () => setTimeout(() => { if (cloudDirty) cloud.onChange(); }, 300));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncAll(); });
+setInterval(() => { if (!document.hidden && !engine.recording) syncAll(); }, 20000);
+
 (async function init() {
   state.projects = (await db.allProjects()).sort((a, b) => b.created - a.created);
   if (!cur()) state.currentId = null;
   setTab(cur() ? 'lyrics' : 'projects');
   refreshInputs();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  syncAll();
 })();

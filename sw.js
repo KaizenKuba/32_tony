@@ -1,7 +1,7 @@
 // Cache powłoki aplikacji – działa offline po pierwszym otwarciu.
-const CACHE = 'wersy-v9';
+const CACHE = 'wersy-v10';
 const FILES = ['./', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/audio.js', 'js/analyze.js', 'js/db.js',
+  'js/app.js', 'js/audio.js', 'js/analyze.js', 'js/db.js', 'js/sync.js', 'js/config.js',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -13,7 +13,7 @@ self.addEventListener('activate', e => {
 });
 // najpierw sieć (świeże wersje), offline z cache
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
+  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     fetch(e.request).then(r => {
       const copy = r.clone();
