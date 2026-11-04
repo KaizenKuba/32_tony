@@ -189,6 +189,7 @@ function renderBeat(p) {
         <button class="${tl.mode === 'section' ? 'on' : ''}" data-act="tl-mode" data-m="section">Przesuń sekcję</button>
         <button class="${tl.mode === 'grid' ? 'on' : ''}" data-act="tl-mode" data-m="grid" ${tl.locked ? 'disabled' : ''}>Przesuń takty</button></div>
       <button class="btn icon small ${tl.locked ? '' : 'unlocked'}" data-act="tl-lock" aria-label="Kłódka">${tl.locked ? '🔒' : '🔓'}</button>
+      <span class="tltime" id="tltime"></span>
       <span class="spacer"></span>
       <button class="btn icon small" data-act="tl-zoom" data-z="0.5">−</button>
       <button class="btn icon small" data-act="tl-zoom" data-z="2">+</button>
@@ -378,6 +379,7 @@ async function takesFor(p, extraSkipTrack) {
   return out;
 }
 
+const fmtClock = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s.toFixed(1).padStart(4, '0')}`; };
 const startPos = p => (p.cursor != null && p.cursor < p.beatDuration) ? p.cursor : timeOfBar(p, p.longStartBar);
 const snapBeat = (p, t) => { const bt = 60 / p.bpm; return Math.max(0, p.firstDownbeat + Math.round((t - p.firstDownbeat) / bt) * bt); };
 
@@ -978,6 +980,12 @@ function drawTimeline(follow = false) {
   g.drawImage(tl.layer, 0, 0);
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+  const tt = document.getElementById('tltime');
+  if (tt) {
+    const t = engine.playing ? engine.position : (p.cursor ?? startPos(p));
+    const txt = `${fmtClock(t)} / ${fmtClock(p.beatDuration)}`;
+    if (tt.textContent !== txt) tt.textContent = txt;
+  }
   // playhead (miejsce startu)
   if (p.cursor != null) {
     const x = X(p.cursor);

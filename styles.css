@@ -137,3 +137,5 @@ ol.steps { padding-left: 20px; margin: 8px 0; }
 
 .notes { width: 100%; min-height: calc(100% - 4px); height: 100%; resize: none; border: 0; outline: none; background: transparent;
   color: var(--text); font: 17px/1.5 -apple-system, system-ui, sans-serif; padding: 4px 2px; }
+.tltime { font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; margin-left: 8px; white-space: nowrap; }
+.tl-tools { flex-wrap: wrap; row-gap: 6px; }

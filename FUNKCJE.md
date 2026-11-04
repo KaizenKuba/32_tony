@@ -16,6 +16,7 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 - Tap tempo: wystukujesz tempo, od 4. stuknięcia ustawia BPM.
 - Przesuwanie początku taktu 1 (co 0,01 s albo o cały bit).
 - Oś czasu: przebieg bitu z liniami taktów i bitów, kolorowe sekcje, zielony wskaźnik odtwarzania, zoom −/+.
+  - Obok kłódki licznik czasu piosenki: pozycja playheada (w trakcie grania aktualna pozycja) / długość bitu, np. 1:23.4 / 3:12.0.
   - Na komputerze: kółko myszy przewija oś, Ctrl + kółko (albo szczypanie na touchpadzie) przybliża i oddala.
   - Tryb „Odtwarzaj”: stuknięcie ustawia playhead (czerwony znacznik, skacze co bit), można go też złapać i przeciągnąć. Start w trybie Long gra od playheada; w trakcie grania stuknięcie przeskakuje odtwarzanie w to miejsce. Przeciąganie poza playheadem przewija.
   - Tryb „Przesuń sekcję”: łapiesz sekcję i przeciągasz ją w inne miejsce, skacze co takt i zabiera ze sobą swój tekst. Jeśli nachodzi na inną sekcję, apka pyta o zgodę.
