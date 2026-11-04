@@ -139,3 +139,5 @@ ol.steps { padding-left: 20px; margin: 8px 0; }
   color: var(--text); font: 17px/1.5 -apple-system, system-ui, sans-serif; padding: 4px 2px; }
 .tltime { font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; margin-left: 8px; white-space: nowrap; }
 .tl-tools { flex-wrap: wrap; row-gap: 6px; }
+.tlplay { display: inline-flex; gap: 4px; margin-left: 6px; }
+.tlplay .btn { font-size: 12px; }

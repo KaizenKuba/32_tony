@@ -189,6 +189,11 @@ function renderBeat(p) {
         <button class="${tl.mode === 'section' ? 'on' : ''}" data-act="tl-mode" data-m="section">Przesuń sekcję</button>
         <button class="${tl.mode === 'grid' ? 'on' : ''}" data-act="tl-mode" data-m="grid" ${tl.locked ? 'disabled' : ''}>Przesuń takty</button></div>
       <button class="btn icon small ${tl.locked ? '' : 'unlocked'}" data-act="tl-lock" aria-label="Kłódka">${tl.locked ? '🔒' : '🔓'}</button>
+      <span class="tlplay">
+        <button class="btn icon small" data-act="start" aria-label="Play">▶</button>
+        <button class="btn icon small" data-act="tl-pause" aria-label="Pauza">❚❚</button>
+        <button class="btn icon small" data-act="stop" aria-label="Stop">■</button>
+      </span>
       <span class="tltime" id="tltime"></span>
       <span class="spacer"></span>
       <button class="btn icon small" data-act="tl-zoom" data-z="0.5">−</button>
@@ -752,6 +757,10 @@ document.addEventListener('click', async e => {
     }
     case 'mode': p.playMode = el.dataset.m; save(); renderTransport(p); return;
     case 'start': startPlayback(); return;
+    case 'tl-pause': {
+      if (!engine.playing || engine.recording) return;
+      p.cursor = Math.min(engine.position, p.beatDuration); engine.stop(); save(); render(); return;
+    }
     case 'stop': engine.stop(); if (state.tab === 'beat') render(); return;
     // test latencji
     case 'lt-close': engine.stop(); modal.hidden = true; render(); return;
