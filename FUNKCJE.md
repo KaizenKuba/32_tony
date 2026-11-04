@@ -23,7 +23,7 @@ Dane zapisują się lokalnie w przeglądarce danego urządzenia (bez synchroniza
 
 ## Nagrywanie
 - Wiele ścieżek wokalu: dodaj, zmień nazwę, wycisz, głośność, usuń.
-- Nagrywanie (●) zaczyna się od wybranego miejsca (Long/Pętla) z bitem w tle; w pętli każde przejście to nowe nagranie.
+- Nagrywanie (●) zaczyna się od wybranego miejsca (Long/Pętla) z bitem w tle.
 - Lista nagrań na ścieżce („Nagranie od taktu X”), usuwanie nagrań.
 - Wybór mikrofonu (domyślnie mikrofon iPhone'a), przycisk „Odśwież”.
 
