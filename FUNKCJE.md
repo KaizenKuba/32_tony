@@ -16,8 +16,10 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 - Tap tempo: wystukujesz tempo, od 4. stuknięcia ustawia BPM.
 - Przesuwanie początku taktu 1 (co 0,01 s albo o cały bit).
 - Oś czasu: przebieg bitu z liniami taktów i bitów, kolorowe sekcje, zielony wskaźnik odtwarzania, zoom −/+.
-  - Tryb „Przewijaj”: przeciąganie przewija, stuknięcie zaznacza takt.
-  - Tryb „Przesuń takty”: przeciągasz siatkę taktów, aż trafi w uderzenia.
+  - Na komputerze: kółko myszy przewija oś, Ctrl + kółko (albo szczypanie na touchpadzie) przybliża i oddala.
+  - Tryb „Odtwarzaj”: stuknięcie ustawia playhead (czerwony znacznik, skacze co bit), można go też złapać i przeciągnąć. Start w trybie Long gra od playheada; w trakcie grania stuknięcie przeskakuje odtwarzanie w to miejsce. Przeciąganie poza playheadem przewija.
+  - Tryb „Przesuń sekcję”: łapiesz sekcję i przeciągasz ją w inne miejsce, skacze co takt i zabiera ze sobą swój tekst. Jeśli nachodzi na inną sekcję, apka pyta o zgodę.
+  - Tryb „Przesuń takty”: przeciągasz siatkę taktów, aż trafi w uderzenia. Zablokowany kłódką (🔒), żeby nie przestawić go niechcący; kliknij kłódkę, żeby odblokować.
 - Siatka taktów: stuknij pierwszy i ostatni takt, potem wybierz sekcję (intro, zwrotka, przedrefren, refren, bridge, outro, inne) albo „Wyczyść”. Sekcje numerują się same (Zwrotka 1, 2…).
 - Wycinanie taktów z bitu: zaznacz takty, „✂ Wytnij takty”. Sekcje, wersy i nagrania za cięciem przesuwają się razem z bitem. „↶ Cofnij ostatnie wycięcie” przywraca stan sprzed cięcia.
 - Lista sekcji z zakresem taktów i liczbą wersów, usuwanie sekcji.
@@ -44,7 +46,7 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 
 ## Transport (pasek na dole)
 - Start: odtwarza od razu.
-- Long: gra od wybranego taktu do końca.
+- Long: gra od playheada (albo wybranego taktu) do końca.
 - Pętla: zapętla zakres taktów od–do.
 - Stop.
 - Wskaźnik bieżącego taktu (T12).

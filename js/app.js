@@ -185,15 +185,19 @@ function renderBeat(p) {
   <div class="card">
     <h2>Takty</h2>
     <div class="tl-tools row">
-      <div class="seg"><button class="${tl.mode === 'scroll' ? 'on' : ''}" data-act="tl-mode" data-m="scroll">Przewijaj</button>
-        <button class="${tl.mode === 'grid' ? 'on' : ''}" data-act="tl-mode" data-m="grid">Przesuń takty</button></div>
+      <div class="seg"><button class="${tl.mode === 'scroll' ? 'on' : ''}" data-act="tl-mode" data-m="scroll">Odtwarzaj</button>
+        <button class="${tl.mode === 'section' ? 'on' : ''}" data-act="tl-mode" data-m="section">Przesuń sekcję</button>
+        <button class="${tl.mode === 'grid' ? 'on' : ''}" data-act="tl-mode" data-m="grid" ${tl.locked ? 'disabled' : ''}>Przesuń takty</button></div>
+      <button class="btn icon small ${tl.locked ? '' : 'unlocked'}" data-act="tl-lock" aria-label="Kłódka">${tl.locked ? '🔒' : '🔓'}</button>
       <span class="spacer"></span>
       <button class="btn icon small" data-act="tl-zoom" data-z="0.5">−</button>
       <button class="btn icon small" data-act="tl-zoom" data-z="2">+</button>
     </div>
     <canvas id="tl" class="tl ${tl.mode}"></canvas>
     <div class="row small" style="margin-top:6px">
-      <span class="muted">${tl.mode === 'grid' ? 'Przeciągnij palcem, aż linie taktów trafią w uderzenia.' : 'Przeciągnij, by przewijać. Stuknij takt, by zaznaczyć.'}</span>
+      <span class="muted">${{ grid: 'Przeciągnij, aż linie taktów trafią w uderzenia. Potem zamknij kłódkę.',
+        section: 'Złap sekcję i przeciągnij ją w inne miejsce (skacze co takt).',
+        scroll: 'Stuknij, by ustawić playhead (skacze co bit), i Start. Przeciągnij, by przewijać. Ctrl + kółko: zoom.' }[tl.mode]}</span>
       <span class="spacer"></span>
       <span class="muted">BPM</span><button class="btn small" data-act="bpm" data-d="-0.1">−0,1</button>
       <button class="btn small" data-act="bpm" data-d="0.1">+0,1</button>
@@ -322,7 +326,7 @@ function renderTransport(p) {
         <button class="${loop ? 'on' : ''}" data-act="mode" data-m="loop">Pętla</button></div>
       ${loop
         ? `<select data-act="loop-a">${barOptions(p, p.loopStartBar)}</select><span class="muted">–</span><select data-act="loop-b">${barOptions(p, p.loopEndBar)}</select>`
-        : `<span class="small muted">od</span><select data-act="long-a">${barOptions(p, p.longStartBar)}</select>`}
+        : `<span class="small muted">od</span><select data-act="long-a">${barOptions(p, p.cursor != null ? barAt(p, p.cursor) : p.longStartBar)}</select>`}
       <span class="spacer"></span><span id="tbar"></span>
     </div>
     <div class="tbtns">
@@ -374,6 +378,9 @@ async function takesFor(p, extraSkipTrack) {
   return out;
 }
 
+const startPos = p => (p.cursor != null && p.cursor < p.beatDuration) ? p.cursor : timeOfBar(p, p.longStartBar);
+const snapBeat = (p, t) => { const bt = 60 / p.bpm; return Math.max(0, p.firstDownbeat + Math.round((t - p.firstDownbeat) / bt) * bt); };
+
 async function startPlayback() {
   const p = cur();
   await engine.unlock();
@@ -383,7 +390,7 @@ async function startPlayback() {
     const a = Math.min(p.loopStartBar, p.loopEndBar), b = Math.max(p.loopStartBar, p.loopEndBar);
     engine.play({ beat, pos: timeOfBar(p, a), loop: [timeOfBar(p, a), timeOfBar(p, b + 1)], takes });
   } else {
-    engine.play({ beat, pos: timeOfBar(p, p.longStartBar), takes });
+    engine.play({ beat, pos: startPos(p), takes });
   }
 }
 
@@ -397,7 +404,7 @@ async function toggleRecord(trackId) {
   if (p.playMode === 'loop') {
     const a = Math.min(p.loopStartBar, p.loopEndBar), b = Math.max(p.loopStartBar, p.loopEndBar);
     pos = timeOfBar(p, a); stopAt = Math.min(timeOfBar(p, b + 1), p.beatDuration);
-  } else pos = timeOfBar(p, p.longStartBar);
+  } else pos = startPos(p);
   state.recTrackId = trackId;
   try {
     await engine.record({
@@ -670,6 +677,7 @@ document.addEventListener('click', async e => {
     }
     case 'tap': return; // obsługa w pointerdown (dokładniejszy czas)
     case 'tl-mode': tl.mode = el.dataset.m; render(); return;
+    case 'tl-lock': tl.locked = !tl.locked; localStorage.setItem('tlLocked', tl.locked ? '1' : '0'); if (tl.locked && tl.mode === 'grid') tl.mode = 'scroll'; render(); return;
     case 'tl-zoom': {
       const c = tlCanvas(); const w = c ? c.clientWidth : 300;
       const center = tl.start + w / tl.pps / 2;
@@ -772,7 +780,7 @@ document.addEventListener('change', e => {
   if (!act) return;
   if (act === 'beat-file' && el.files[0]) importBeat(el.files[0]);
   else if (act === 'bpm-input') { const v = Number(el.value); if (v >= 40 && v <= 240) { p.bpm = v; clampSections(p); save(); } render(); }
-  else if (act === 'long-a') { p.longStartBar = Number(el.value); save(); }
+  else if (act === 'long-a') { p.longStartBar = Number(el.value); p.cursor = timeOfBar(p, p.longStartBar); save(); drawTimeline(); }
   else if (act === 'loop-a') { p.loopStartBar = Number(el.value); save(); }
   else if (act === 'loop-b') { p.loopEndBar = Number(el.value); save(); }
   else if (act === 'mic') { state.micId = el.value; localStorage.setItem('micId', el.value); }
@@ -842,7 +850,7 @@ async function cutBars(p) {
     p.tracks.forEach(t => t.takes.forEach(tk => { if (tk.startTime >= t1 - 0.05) tk.startTime -= dt; }));
     const shift = x => x > b ? x - k : x >= a ? a : x;
     const n = barCount(p);
-    p.longStartBar = Math.min(n, shift(p.longStartBar));
+    p.longStartBar = Math.min(n, shift(p.longStartBar)); p.cursor = null;
     p.loopStartBar = Math.min(n, shift(p.loopStartBar));
     p.loopEndBar = Math.min(n, Math.max(p.loopStartBar, shift(p.loopEndBar)));
     clampSections(p);
@@ -891,7 +899,7 @@ function tapTempo(p) {
 }
 
 // ---------- oś czasu (przebieg bitu + takty) ----------
-const tl = { mode: 'scroll', pps: 100, start: 0, peaks: null, peaksKey: null, rate: 200 };
+const tl = { mode: 'scroll', pps: 100, start: 0, peaks: null, peaksKey: null, rate: 200, locked: localStorage.getItem('tlLocked') !== '0', secDrag: null };
 
 async function ensurePeaks(p) {
   if (tl.peaksKey === p.beatKey && tl.peaks) return;
@@ -956,7 +964,7 @@ function drawTimeline(follow = false) {
   // statyczna warstwa (przebieg, siatka, sekcje) rysowana tylko gdy coś się zmieni;
   // co klatkę kopiujemy ją i dokładamy sam wskaźnik – żeby nie obciążać telefonu w trakcie grania
   const key = [cw, ch, dpr, t0, tl.pps, tl.mode, p.bpm, p.firstDownbeat, p.beatKey, !!tl.peaks,
-    JSON.stringify(state.sel), p.sections.map(s => s.kind + s.startBar + '-' + s.endBar + s.number).join()].join('|');
+    JSON.stringify(state.sel), JSON.stringify(tl.secDrag), p.sections.map(s => s.kind + s.startBar + '-' + s.endBar + s.number).join()].join('|');
   if (!tl.layer) tl.layer = document.createElement('canvas');
   if (tl.layerKey !== key) {
     tl.layer.width = c.width; tl.layer.height = c.height;
@@ -970,6 +978,14 @@ function drawTimeline(follow = false) {
   g.drawImage(tl.layer, 0, 0);
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+  // playhead (miejsce startu)
+  if (p.cursor != null) {
+    const x = X(p.cursor);
+    if (x >= -8 && x <= cw + 8) {
+      g.fillStyle = cssVar('--accent'); g.fillRect(x - 1, 0, 2, ch);
+      g.beginPath(); g.moveTo(x - 7, 0); g.lineTo(x + 7, 0); g.lineTo(x, 10); g.closePath(); g.fill();
+    }
+  }
   // wskaźnik odtwarzania
   if (engine.playing) {
     const x = X(engine.position);
@@ -983,7 +999,9 @@ function drawStatic(g, p, cw, ch, t0, t1, X, band, wTop, wH) {
 
   // sekcje (pasek u góry)
   for (const s of p.sections) {
-    const a = X(timeOfBar(p, s.startBar)), b = X(timeOfBar(p, s.endBar + 1));
+    const off = tl.secDrag && tl.secDrag.id === s.id ? tl.secDrag.d : 0;
+    if (off) { g.globalAlpha = 0.25; g.fillStyle = cssVar('--' + s.kind); g.fillRect(X(timeOfBar(p, s.startBar)), 0, X(timeOfBar(p, s.endBar + 1)) - X(timeOfBar(p, s.startBar)), band); g.globalAlpha = 1; }
+    const a = X(timeOfBar(p, s.startBar + off)), b = X(timeOfBar(p, s.endBar + 1 + off));
     if (b < 0 || a > cw) continue;
     g.fillStyle = cssVar('--' + s.kind);
     g.globalAlpha = 0.9; g.fillRect(a, 0, b - a, band);
@@ -1047,9 +1065,14 @@ function bindTimeline(c) {
   if (c._bound) return;
   c._bound = true;
   let down = null;
+  const timeAtX = clientX => tl.start + (clientX - c.getBoundingClientRect().left) / tl.pps;
   c.addEventListener('pointerdown', e => {
     const p = cur();
-    down = { x: e.clientX, y: e.clientY, start: tl.start, db: p.firstDownbeat, moved: false, id: e.pointerId };
+    const t = timeAtX(e.clientX);
+    const nearCursor = p.cursor != null && Math.abs((p.cursor - t) * tl.pps) < 14;
+    const sec = tl.mode === 'section' ? sectionAt(p, barAt(p, t)) : null;
+    down = { x: e.clientX, y: e.clientY, start: tl.start, db: p.firstDownbeat, moved: false, id: e.pointerId,
+      dragCursor: tl.mode === 'scroll' && nearCursor, sec };
   });
   c.addEventListener('pointermove', e => {
     if (!down || e.pointerId !== down.id) return;
@@ -1066,6 +1089,13 @@ function bindTimeline(c) {
       let v = down.db + dx / tl.pps;
       v = ((v % bd) + bd) % bd;
       p.firstDownbeat = Math.round(v * 1000) / 1000;
+    } else if (down.dragCursor) {
+      p.cursor = snapBeat(p, timeAtX(e.clientX));
+    } else if (down.sec) {
+      const s = down.sec, n = barCount(p);
+      let d = Math.round(dx / tl.pps / barDur(p));
+      d = Math.max(1 - s.startBar, Math.min(n - s.endBar, d));
+      tl.secDrag = { id: s.id, d };
     } else {
       tl.start = Math.max(0, down.start - dx / tl.pps);
     }
@@ -1077,19 +1107,47 @@ function bindTimeline(c) {
     const d = down; down = null;
     if (d.moved) {
       if (tl.mode === 'grid') { clampSections(p); save(p); render(); }
+      else if (d.dragCursor) { save(p); renderTransport(p); if (engine.playing && p.playMode !== 'loop') startPlayback(); }
+      else if (d.sec && tl.secDrag) { moveSection(p, d.sec, tl.secDrag.d); tl.secDrag = null; save(p); render(); }
       return;
     }
-    // stuknięcie: zaznacz takt
-    const r = c.getBoundingClientRect();
-    const t = tl.start + (e.clientX - r.left) / tl.pps;
-    if (t < p.firstDownbeat) return;
-    const b = Math.min(barCount(p), barAt(p, t));
-    if (!state.sel || state.sel.b != null) state.sel = { a: b, b: null };
-    else state.sel.b = b;
-    render();
+    if (tl.mode !== 'scroll') return;
+    // stuknięcie: ustaw playhead (co bit); w trakcie grania – skocz tam
+    const t = timeAtX(e.clientX);
+    if (t > p.beatDuration) return;
+    p.cursor = snapBeat(p, t);
+    save(p); renderTransport(p); drawTimeline();
+    if (engine.playing && p.playMode !== 'loop') startPlayback();
   };
   c.addEventListener('pointerup', up);
-  c.addEventListener('pointercancel', () => { down = null; });
+  c.addEventListener('pointercancel', () => { down = null; if (tl.secDrag) { tl.secDrag = null; drawTimeline(); } });
+  // kółko: przewijanie; Ctrl/⌘ + kółko (albo szczypanie na touchpadzie): zoom wokół kursora
+  c.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      const tAt = timeAtX(e.clientX), x = e.clientX - c.getBoundingClientRect().left;
+      tl.pps = Math.max(8, Math.min(600, tl.pps * Math.exp(-e.deltaY * 0.01)));
+      tl.start = Math.max(0, tAt - x / tl.pps);
+    } else {
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      tl.start = Math.max(0, tl.start + d / tl.pps);
+    }
+    drawTimeline();
+  }, { passive: false });
+}
+
+function moveSection(p, sec, d) {
+  if (!d) return;
+  const lo = sec.startBar + d, hi = sec.endBar + d;
+  const others = p.sections.filter(s => s.id !== sec.id);
+  const hit = others.filter(s => s.endBar >= lo && s.startBar <= hi);
+  if (hit.length && !confirm(`Sekcja nachodzi na: ${hit.map(secTitle).join(', ')}. Te takty (i ich tekst) zostaną zastąpione. Przesunąć?`)) return;
+  p.sections = others;
+  state.sel = { a: lo, b: hi };
+  markSection(p, null); // wycina miejsce pod sekcję z innych sekcji
+  p.sections.push({ ...sec, startBar: lo, endBar: hi });
+  p.sections.sort((x, y) => x.startBar - y.startBar);
+  markRenumber(p);
 }
 
 window.addEventListener('resize', () => drawTimeline());

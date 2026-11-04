@@ -130,6 +130,8 @@ ol.steps { padding-left: 20px; margin: 8px 0; }
 .tl { width: 100%; height: 150px; display: block; border-radius: 10px; touch-action: pan-y; margin-top: 8px; }
 .tl.grid { outline: 2px solid var(--accent); }
 .tl-tools .seg button { font-size: 13px; }
+.tl-tools .seg button:disabled { opacity: .4; }
+.tl.section { outline: 2px dashed var(--line); }
 .btn.tap { min-width: 104px; font-variant-numeric: tabular-nums; touch-action: manipulation; }
 .btn.tap:active { background: var(--accent); color: #fff; }
 
