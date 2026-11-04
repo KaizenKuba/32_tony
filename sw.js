@@ -1,5 +1,5 @@
 // Cache powłoki aplikacji – działa offline po pierwszym otwarciu.
-const CACHE = 'wersy-v2';
+const CACHE = 'wersy-v3';
 const FILES = ['./', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/audio.js', 'js/analyze.js', 'js/db.js',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];

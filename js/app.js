@@ -102,6 +102,7 @@ function render() {
   transport.hidden = state.tab === 'projects' || !p || !p.beatKey;
   if (!transport.hidden) renderTransport(p);
   view.scrollTop = keep;
+  initTimeline();
   updatePlayhead(true);
 }
 
@@ -162,6 +163,21 @@ function renderBeat(p) {
 
   <div class="card">
     <h2>Takty</h2>
+    <div class="tl-tools row">
+      <div class="seg"><button class="${tl.mode === 'scroll' ? 'on' : ''}" data-act="tl-mode" data-m="scroll">Przewijaj</button>
+        <button class="${tl.mode === 'grid' ? 'on' : ''}" data-act="tl-mode" data-m="grid">Przesuń takty</button></div>
+      <span class="spacer"></span>
+      <button class="btn icon small" data-act="tl-zoom" data-z="0.5">−</button>
+      <button class="btn icon small" data-act="tl-zoom" data-z="2">+</button>
+    </div>
+    <canvas id="tl" class="tl ${tl.mode}"></canvas>
+    <div class="row small" style="margin-top:6px">
+      <span class="muted">${tl.mode === 'grid' ? 'Przeciągnij palcem, aż linie taktów trafią w uderzenia.' : 'Przeciągnij, by przewijać. Stuknij takt, by zaznaczyć.'}</span>
+      <span class="spacer"></span>
+      <span class="muted">BPM</span><button class="btn small" data-act="bpm" data-d="-0.1">−0,1</button>
+      <button class="btn small" data-act="bpm" data-d="0.1">+0,1</button>
+    </div>
+    <div style="height:10px"></div>
     <div class="bars">${Array.from({ length: n }, (_, i) => {
       const bar = i + 1, s = sectionAt(p, bar);
       const sel = a != null && bar >= a && bar <= b;
@@ -290,6 +306,7 @@ function renderTransport(p) {
 // ---------- playhead ----------
 let lastBar = null;
 function updatePlayhead(force = false) {
+  if (engine.playing || force) drawTimeline(true);
   const p = cur();
   const tb = document.getElementById('tbar');
   if (!p || !p.beatKey) return;
@@ -605,7 +622,7 @@ document.addEventListener('click', async e => {
       setTab('projects');
       return;
     }
-    case 'bpm': p.bpm = Math.max(40, Math.min(240, Math.round((p.bpm + Number(el.dataset.d)) * 10) / 10)); clampSections(p); save(); render(); return;
+    case 'bpm': p.bpm = Math.max(40, Math.min(240, Math.round((p.bpm + Number(el.dataset.d)) * 100) / 100)); clampSections(p); save(); render(); return;
     case 'bpm-mul': p.bpm = Math.round(p.bpm * Number(el.dataset.m) * 10) / 10; clampSections(p); save(); render(); return;
     case 'down': nudgeDown(p, Number(el.dataset.d)); return;
     case 'down-beat': nudgeDown(p, barDur(p) / p.beatsPerBar); return;
@@ -619,6 +636,14 @@ document.addEventListener('click', async e => {
       if (!state.sel || state.sel.b != null) state.sel = { a: b, b: null };
       else state.sel.b = b;
       render(); return;
+    }
+    case 'tl-mode': tl.mode = el.dataset.m; render(); return;
+    case 'tl-zoom': {
+      const c = tlCanvas(); const w = c ? c.clientWidth : 300;
+      const center = tl.start + w / tl.pps / 2;
+      tl.pps = Math.max(8, Math.min(600, tl.pps * Number(el.dataset.z)));
+      tl.start = Math.max(0, center - w / tl.pps / 2);
+      drawTimeline(); return;
     }
     case 'sel-clear': state.sel = null; render(); return;
     case 'mark': markSection(p, el.dataset.kind); save(); render(); return;
@@ -718,6 +743,184 @@ function openProject(id, tab) {
   localStorage.setItem('currentId', id);
   setTab(tab);
 }
+
+// ---------- oś czasu (przebieg bitu + takty) ----------
+const tl = { mode: 'scroll', pps: 100, start: 0, peaks: null, peaksKey: null, rate: 200 };
+
+async function ensurePeaks(p) {
+  if (tl.peaksKey === p.beatKey && tl.peaks) return;
+  const b = await getBuffer(p.beatKey);
+  if (!b) return;
+  const per = Math.max(1, Math.floor(b.sampleRate / tl.rate));
+  const n = Math.ceil(b.length / per);
+  const peaks = new Float32Array(n);
+  const chans = [];
+  for (let c = 0; c < b.numberOfChannels; c++) chans.push(b.getChannelData(c));
+  for (let i = 0; i < n; i++) {
+    let m = 0;
+    const e = Math.min(b.length, (i + 1) * per);
+    for (const d of chans) for (let k = i * per; k < e; k++) { const v = d[k] < 0 ? -d[k] : d[k]; if (v > m) m = v; }
+    peaks[i] = m;
+  }
+  let max = 0; for (const v of peaks) if (v > max) max = v;
+  if (max > 0) for (let i = 0; i < n; i++) peaks[i] /= max;
+  tl.peaks = peaks; tl.peaksKey = p.beatKey;
+}
+
+function tlCanvas() { return state.tab === 'beat' ? document.getElementById('tl') : null; }
+
+async function initTimeline() {
+  const c = tlCanvas();
+  if (!c) return;
+  const p = cur();
+  if (tl.peaksKey !== p.beatKey) { tl.peaks = null; drawTimeline(); await ensurePeaks(p); }
+  bindTimeline(c);
+  drawTimeline();
+}
+
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+function drawTimeline(follow = false) {
+  const c = tlCanvas();
+  if (!c) return;
+  const p = cur();
+  const dpr = window.devicePixelRatio || 1;
+  const cw = c.clientWidth, ch = c.clientHeight;
+  if (!cw) return;
+  if (c.width !== Math.round(cw * dpr)) { c.width = Math.round(cw * dpr); c.height = Math.round(ch * dpr); }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const viewDur = cw / tl.pps;
+  // śledzenie wskaźnika odtwarzania
+  if (follow && engine.playing) {
+    const pos = engine.position;
+    if (pos < tl.start || pos > tl.start + viewDur * 0.85) tl.start = Math.max(0, pos - viewDur * 0.15);
+  }
+  tl.start = Math.max(0, Math.min(tl.start, Math.max(0, p.beatDuration - viewDur * 0.5)));
+  const t0 = tl.start, t1 = t0 + viewDur;
+  const X = t => (t - t0) * tl.pps;
+  const band = 20, wTop = band, wH = ch - band - 16;
+
+  g.clearRect(0, 0, cw, ch);
+  g.fillStyle = cssVar('--panel2'); g.fillRect(0, 0, cw, ch);
+
+  // sekcje (pasek u góry)
+  for (const s of p.sections) {
+    const a = X(timeOfBar(p, s.startBar)), b = X(timeOfBar(p, s.endBar + 1));
+    if (b < 0 || a > cw) continue;
+    g.fillStyle = cssVar('--' + s.kind);
+    g.globalAlpha = 0.9; g.fillRect(a, 0, b - a, band);
+    g.globalAlpha = 0.12; g.fillRect(a, band, b - a, ch - band);
+    g.globalAlpha = 1;
+    g.fillStyle = '#fff'; g.font = '600 11px -apple-system, system-ui, sans-serif';
+    g.fillText(secTitle(s), Math.max(a, 0) + 4, 14, Math.max(0, b - Math.max(a, 0) - 8));
+  }
+
+  // zaznaczenie
+  if (state.sel) {
+    const lo = Math.min(state.sel.a, state.sel.b ?? state.sel.a), hi = Math.max(state.sel.a, state.sel.b ?? state.sel.a);
+    g.fillStyle = cssVar('--text'); g.globalAlpha = 0.15;
+    g.fillRect(X(timeOfBar(p, lo)), band, X(timeOfBar(p, hi + 1)) - X(timeOfBar(p, lo)), ch - band);
+    g.globalAlpha = 1;
+  }
+
+  // przebieg
+  if (tl.peaks) {
+    g.fillStyle = cssVar('--muted');
+    const mid = wTop + wH / 2;
+    for (let x = 0; x < cw; x++) {
+      const i0 = Math.floor((t0 + x / tl.pps) * tl.rate), i1 = Math.max(i0 + 1, Math.floor((t0 + (x + 1) / tl.pps) * tl.rate));
+      let m = 0;
+      for (let i = i0; i < i1 && i < tl.peaks.length; i++) if (tl.peaks[i] > m) m = tl.peaks[i];
+      const h = m * wH / 2;
+      if (h > 0.3) g.fillRect(x, mid - h, 1, h * 2);
+    }
+  } else {
+    g.fillStyle = cssVar('--muted'); g.font = '13px system-ui'; g.fillText('Ładuję przebieg…', 10, ch / 2);
+  }
+
+  // siatka: beaty i takty
+  const beat = 60 / p.bpm;
+  const firstBeatIdx = Math.ceil((t0 - p.firstDownbeat) / beat);
+  for (let k = firstBeatIdx; ; k++) {
+    const t = p.firstDownbeat + k * beat;
+    if (t > t1) break;
+    if (t < 0) continue;
+    const x = Math.round(X(t)) + 0.5;
+    const isBar = ((k % p.beatsPerBar) + p.beatsPerBar) % p.beatsPerBar === 0;
+    if (isBar) {
+      const bar = Math.round(k / p.beatsPerBar) + 1;
+      if (bar < 1) continue;
+      g.strokeStyle = tl.mode === 'grid' ? cssVar('--accent') : cssVar('--text');
+      g.globalAlpha = 0.85; g.lineWidth = bar === 1 ? 2.5 : 1.5;
+      g.beginPath(); g.moveTo(x, band); g.lineTo(x, ch); g.stroke();
+      g.globalAlpha = 1;
+      g.fillStyle = cssVar('--text'); g.font = '600 11px -apple-system, system-ui, sans-serif';
+      g.fillText(String(bar), x + 3, ch - 4);
+    } else if (tl.pps * beat > 12) {
+      g.strokeStyle = cssVar('--text'); g.globalAlpha = 0.18; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x, band); g.lineTo(x, ch - 14); g.stroke();
+      g.globalAlpha = 1;
+    }
+  }
+
+  // wskaźnik odtwarzania
+  if (engine.playing) {
+    const x = X(engine.position);
+    g.fillStyle = cssVar('--ok'); g.fillRect(x - 1, 0, 2, ch);
+  }
+}
+
+function bindTimeline(c) {
+  if (c._bound) return;
+  c._bound = true;
+  let down = null;
+  c.addEventListener('pointerdown', e => {
+    const p = cur();
+    down = { x: e.clientX, y: e.clientY, start: tl.start, db: p.firstDownbeat, moved: false, id: e.pointerId };
+  });
+  c.addEventListener('pointermove', e => {
+    if (!down || e.pointerId !== down.id) return;
+    const dx = e.clientX - down.x, dy = e.clientY - down.y;
+    if (!down.moved) {
+      if (Math.abs(dx) < 6) return;
+      if (Math.abs(dy) > Math.abs(dx)) { down = null; return; } // pionowy gest = przewijanie strony
+      down.moved = true;
+      try { c.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+    const p = cur();
+    if (tl.mode === 'grid') {
+      const bd = barDur(p);
+      let v = down.db + dx / tl.pps;
+      v = ((v % bd) + bd) % bd;
+      p.firstDownbeat = Math.round(v * 1000) / 1000;
+    } else {
+      tl.start = Math.max(0, down.start - dx / tl.pps);
+    }
+    drawTimeline();
+  });
+  const up = e => {
+    if (!down || e.pointerId !== down.id) return;
+    const p = cur();
+    const d = down; down = null;
+    if (d.moved) {
+      if (tl.mode === 'grid') { clampSections(p); save(p); render(); }
+      return;
+    }
+    // stuknięcie: zaznacz takt
+    const r = c.getBoundingClientRect();
+    const t = tl.start + (e.clientX - r.left) / tl.pps;
+    if (t < p.firstDownbeat) return;
+    const b = Math.min(barCount(p), barAt(p, t));
+    if (!state.sel || state.sel.b != null) state.sel = { a: b, b: null };
+    else state.sel.b = b;
+    render();
+  };
+  c.addEventListener('pointerup', up);
+  c.addEventListener('pointercancel', () => { down = null; });
+}
+
+window.addEventListener('resize', () => drawTimeline());
 
 const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 

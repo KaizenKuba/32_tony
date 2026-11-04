@@ -122,3 +122,8 @@ canvas.wave { width: 100%; height: 150px; background: var(--panel2); border-radi
 .big-ms { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
 ol.steps { padding-left: 20px; margin: 8px 0; }
 .notice { font-size: 13px; color: var(--muted); background: var(--panel2); border-radius: 10px; padding: 8px 10px; }
+
+/* oś czasu */
+.tl { width: 100%; height: 150px; display: block; border-radius: 10px; touch-action: pan-y; margin-top: 8px; }
+.tl.grid { outline: 2px solid var(--accent); }
+.tl-tools .seg button { font-size: 13px; }
