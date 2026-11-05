@@ -168,6 +168,31 @@ function renderProjects() {
 }
 
 // ---------- bank bitów ----------
+async function useBankBeat(b) {
+  const blob = (await db.getBlob(b.beatKey)) || (await fetchBlob(b.beatKey));
+  if (!blob) { alert('Nie mogę wczytać tego bitu.'); return; }
+  const file = new File([blob], b.fileName || (b.name + '.mp3'), { type: blob.type });
+  await importBeat(file);
+  const q = cur();
+  q.beatName = b.name;
+  if (b.bpm) { q.bpm = Math.round(b.bpm * 100) / 100; clampSections(q); }
+  save(q); render();
+}
+
+function bankChooser() {
+  modal.hidden = false;
+  const items = state.bank || [];
+  modal.innerHTML = `<div class="sheet chooser">
+    <div class="row"><b>Wybierz z banku bitów</b><span class="spacer"></span><button class="btn small" data-act="bank-close">Zamknij</button></div>
+    ${items.length ? `<div class="tiles" style="max-height:60vh;overflow:auto">${items.map(b => `<div class="tile ${state.bankPlaying === b.id ? 'playing' : ''}">
+        <button class="tplay" data-act="bank-play" data-id="${b.id}">${state.bankPlaying === b.id ? '■' : '▶'}</button>
+        <div class="tinfo" data-act="bank-pick" data-id="${b.id}"><div class="tname">${esc(b.name)}</div>
+          <div class="small muted">${b.bpm ? String(Math.round(b.bpm * 10) / 10).replace('.', ',') + ' BPM' : ''}</div></div>
+        <button class="btn small primary" data-act="bank-pick" data-id="${b.id}">Wybierz</button></div>`).join('')}</div>`
+      : '<p class="small muted">Bank jest pusty. Dodaj bity w zakładce Projekty.</p>'}
+  </div>`;
+}
+
 async function bankUpload(files) {
   const list = [...files];
   for (let n = 0; n < list.length; n++) {
@@ -191,16 +216,17 @@ async function bankUpload(files) {
   state.bankBusy = ''; render();
 }
 
+function bankRefresh() { render(); if (!modal.hidden && modal.querySelector('.chooser')) bankChooser(); }
 async function bankPlay(id) {
-  if (state.bankPlaying === id) { engine.stop(); state.bankPlaying = null; render(); return; }
+  if (state.bankPlaying === id) { engine.stop(); state.bankPlaying = null; bankRefresh(); return; }
   const b = state.bank.find(x => x.id === id);
   await engine.unlock();
-  state.bankBusy = 'Ładuję…'; render();
+  state.bankBusy = 'Ładuję…'; bankRefresh();
   const buf = await getBuffer(b.beatKey);
   state.bankBusy = '';
-  if (!buf) { alert('Nie mogę wczytać tego bitu.'); render(); return; }
+  if (!buf) { alert('Nie mogę wczytać tego bitu.'); bankRefresh(); return; }
   engine.play({ beat: buf, pos: 0 });
-  state.bankPlaying = id; render();
+  state.bankPlaying = id; bankRefresh();
 }
 
 function bankMenu(b) {
@@ -228,11 +254,12 @@ function renderBeat(p) {
   if (!p.beatKey) {
     view.innerHTML = `<div class="empty"><div class="big">〰</div>
       Dodaj bit, a aplikacja sama sprawdzi BPM i podzieli go na takty.<br><br>
-      <label class="btn primary">+ Dodaj bit<input type="file" data-act="beat-file" hidden></label>
+      <label class="btn primary">+ Dodaj bit z pliku<input type="file" data-act="beat-file" hidden></label>
+      ${(state.bank || []).length ? '<br><br><button class="btn" data-act="bank-choose">Wybierz z banku bitów</button>' : ''}
       ${state.analyzing ? '<p>Analizuję bit…</p>' : ''}</div>`;
     return;
   }
-  topAction.innerHTML = `<label class="btn small">Zmień bit<input type="file" data-act="beat-file" hidden></label>`;
+  topAction.innerHTML = `${(state.bank || []).length ? '<button class="btn small" data-act="bank-choose">Z banku</button> ' : ''}<label class="btn small">Zmień bit<input type="file" data-act="beat-file" hidden></label>`;
   const n = barCount(p);
   const a = state.sel ? Math.min(state.sel.a, state.sel.b ?? state.sel.a) : null;
   const b = state.sel ? Math.max(state.sel.a, state.sel.b ?? state.sel.a) : null;
@@ -679,15 +706,20 @@ function lineHTML(s, l, i) {
 function autoSize(t) { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }
 
 // ---------- Transport ----------
-function barOptions(p, selected) {
+const KIND_DOT = { intro: '⚪', verse: '🔵', chorus: '🟠', prechorus: '🟡', bridge: '🟣', outro: '🟤', other: '🟢' };
+const KIND_HEX = { intro: '#8a8f99', verse: '#3d8bff', chorus: '#ff9f1a', prechorus: '#c9a800', bridge: '#a66bff', outro: '#b08060', other: '#1fc2b5' };
+function barOptions(p, selected, end = false) {
   const n = Math.max(1, barCount(p));
   let html = '';
+  if (p.sections.length) {
+    html += `<optgroup label="Sekcje">${p.sections.map(s => `<option value="s${end ? s.endBar : s.startBar}" style="color:${KIND_HEX[s.kind]};font-weight:700">${KIND_DOT[s.kind] || '●'} ${secTitle(s)} (${s.startBar}–${s.endBar})</option>`).join('')}</optgroup><optgroup label="Takty">`;
+  }
   for (let b = 1; b <= n; b++) {
     const s = sectionAt(p, b);
     const label = s ? `${b} · ${secTitle(s)} ${b - s.startBar + 1}` : `${b}`;
     html += `<option value="${b}" ${b === selected ? 'selected' : ''}>${label}</option>`;
   }
-  return html;
+  return p.sections.length ? html + '</optgroup>' : html;
 }
 
 function renderTransport(p) {
@@ -697,7 +729,7 @@ function renderTransport(p) {
       <div class="seg"><button class="${loop ? '' : 'on'}" data-act="mode" data-m="long">Long</button>
         <button class="${loop ? 'on' : ''}" data-act="mode" data-m="loop">Pętla</button></div>
       ${loop
-        ? `<select data-act="loop-a">${barOptions(p, p.loopStartBar)}</select><span class="muted">–</span><select data-act="loop-b">${barOptions(p, p.loopEndBar)}</select>`
+        ? `<select data-act="loop-a">${barOptions(p, p.loopStartBar)}</select><span class="muted">–</span><select data-act="loop-b">${barOptions(p, p.loopEndBar, true)}</select>`
         : `<span class="small muted">od</span><select data-act="long-a">${barOptions(p, p.cursor != null ? barAt(p, p.cursor) : p.longStartBar)}</select>`}
       <span class="spacer"></span><span id="tbar"></span>
     </div>
@@ -1108,17 +1140,20 @@ document.addEventListener('click', async e => {
       const name = prompt('Nazwa piosenki', b.name);
       if (name === null) return;
       engine.stop(); state.bankPlaying = null; modal.hidden = true;
-      const blob = (await db.getBlob(b.beatKey)) || (await fetchBlob(b.beatKey));
-      if (!blob) { alert('Nie mogę wczytać tego bitu.'); return; }
       const np = newProject(name.trim() || b.name);
       np.updated = Date.now(); state.projects.unshift(np); await db.putProject(np);
       state.currentId = np.id; localStorage.setItem('currentId', np.id);
-      const file = new File([blob], b.fileName || (b.name + '.mp3'), { type: blob.type });
       setTab('beat');
-      await importBeat(file);
-      if (b.bpm) { const q = cur(); q.bpm = Math.round(b.bpm * 100) / 100; clampSections(q); save(q); render(); }
+      await useBankBeat(b);
       return;
     }
+    case 'bank-pick': {
+      if (p.beatKey && !confirm('Zamienić obecny bit na ten z banku?')) return;
+      engine.stop(); state.bankPlaying = null; modal.hidden = true;
+      await useBankBeat(state.bank.find(x => x.id === el.dataset.id));
+      return;
+    }
+    case 'bank-choose': bankChooser(); return;
     case 'bit-collapse': localStorage.setItem('bitCollapsed', localStorage.getItem('bitCollapsed') === '1' ? '0' : '1'); render(); return;
     case 'login': case 'signup': {
       const email = $('#cl-email').value.trim(), pass = $('#cl-pass').value;
@@ -1242,10 +1277,15 @@ document.addEventListener('change', e => {
   if (act === 'bank-file' && el.files.length) { bankUpload(el.files); el.value = ''; }
   else if (act === 'beat-file' && el.files[0]) importBeat(el.files[0]);
   else if (act === 'bpm-input') { const v = Number(el.value); if (v >= 40 && v <= 240) { p.bpm = v; clampSections(p); save(); } render(); }
-  else if (act === 'long-a') { p.longStartBar = Number(el.value); p.cursor = timeOfBar(p, p.longStartBar); save(); drawTimeline(); }
-  else if (act === 'lt-start') { p.latencyStartBar = Number(el.value); lt.take = null; save(); renderLatency(); }
-  else if (act === 'loop-a') { p.loopStartBar = Number(el.value); save(); }
-  else if (act === 'loop-b') { p.loopEndBar = Number(el.value); save(); }
+  else if (act === 'long-a') { p.longStartBar = Number(String(el.value).replace('s', '')); p.cursor = timeOfBar(p, p.longStartBar); save(); renderTransport(p); drawTimeline(); drawMulti(); }
+  else if (act === 'lt-start') { p.latencyStartBar = Number(String(el.value).replace('s', '')); lt.take = null; save(); renderLatency(); }
+  else if (act === 'loop-a') {
+    const v = String(el.value);
+    if (v[0] === 's') { const sec = p.sections.find(x => x.startBar === Number(v.slice(1))); p.loopStartBar = sec.startBar; p.loopEndBar = sec.endBar; }
+    else p.loopStartBar = Number(v);
+    save(); renderTransport(p);
+  }
+  else if (act === 'loop-b') { p.loopEndBar = Number(String(el.value).replace('s', '')); save(); renderTransport(p); }
   else if (act === 'mic') { state.micId = el.value; localStorage.setItem('micId', el.value); }
 });
 

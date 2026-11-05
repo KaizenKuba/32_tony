@@ -12,6 +12,7 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 
 ## Bit
 - Panel „Bit” (BPM, tempo, początek taktu) zwija się po stuknięciu nagłówka; zwinięty pokazuje tylko nazwę pliku, BPM i liczbę taktów.
+- Przy nowej piosence albo zmianie bitu można wybrać bit z Banku bitów („Wybierz z banku bitów” / „Z banku”), z odsłuchem przed wyborem; przejmuje nazwę i tempo z banku.
 - Dodanie bitu z pliku (MP3, WAV, M4A i inne, które obsługuje przeglądarka). Zmiana bitu.
 - Automatyczne wykrywanie BPM i początku taktu 1 („Wykryj ponownie”).
 - Ręczna korekta BPM: −/+ 0,5, wpisanie liczby, −/+ 0,1, ÷2 i ×2.
@@ -55,6 +56,7 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 ## Transport (pasek na dole)
 - Start: odtwarza od razu.
 - Long: gra od playheada (albo wybranego taktu) do końca.
+- Lista „od” (i od–do w Pętli) ma na samej górze skróty do sekcji po kolei, z kolorową kropką sekcji (⚪ Intro, 🔵 Zwrotka 1, 🟠 Refren 1…), a pod nimi wszystkie takty. W Pętli wybranie sekcji w polu „od” zapętla od razu całą sekcję.
 - Pętla: zapętla zakres taktów od–do.
 - Stop.
 - Wskaźnik bieżącego taktu (T12).
