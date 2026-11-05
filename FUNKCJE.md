@@ -5,6 +5,7 @@ Aplikacja działa w Safari na iPhonie (PWA, „Dodaj do ekranu początkowego”)
 Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (Supabase).
 
 ## Projekty
+- Bank bitów (u góry, zwijany): „＋ Dodaj bity” wrzuca jeden lub wiele plików naraz, apka sama wykrywa tempo. Każdy bit to kafelek z ▶ do odsłuchu (■ zatrzymuje). Trzy kropki ⋮ (albo stuknięcie nazwy): wyświetlana nazwa, tempo, notatki, „Nowa piosenka z tym bitem” (tworzy projekt z kopią bitu i jego tempem), Usuń. Bank synchronizuje się z kontem razem z plikami.
 - Lista piosenek: dodaj nową, otwórz, zmień nazwę, usuń.
 - Synchronizacja: logowanie e-mailem i hasłem (Zaloguj / Załóż konto). Projekty, bity i nagrania są takie same na telefonie i komputerze. Zmiany wysyłają się same po chwili, a apka sprawdza nowości co 20 s i po powrocie do niej. Przycisk „Zapisz / odśwież” robi to od razu.
 - Przy każdej piosence: BPM, liczba taktów i wersów.

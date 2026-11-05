@@ -69,7 +69,7 @@ async function api(path, opts = {}) {
 }
 
 // ---------- pliki audio ----------
-const blobKeys = p => [p.beatKey, p.undo?.beatKey, ...p.tracks.flatMap(t => t.takes.map(k => k.key))].filter(Boolean);
+const blobKeys = p => [p.beatKey, p.undo?.beatKey, ...(p.tracks || []).flatMap(t => t.takes.map(k => k.key))].filter(Boolean);
 const objPath = k => `blobs/${userId()}/${encodeURIComponent(k)}`;
 
 async function uploadBlob(key) {

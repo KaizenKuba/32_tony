@@ -128,15 +128,36 @@ function cloudHTML() {
     ${cloud.status ? `<div class="small muted" style="margin-top:6px">${esc(cloud.status)}</div>` : ''}</div>`;
 }
 
+function bankHTML() {
+  const open = localStorage.getItem('bankOpen') !== '0';
+  const items = state.bank || [];
+  return `<div class="card bank">
+    <h2 class="collapsible" data-act="bank-toggle">${open ? '▾' : '▸'} Bank bitów <span class="small muted" style="text-transform:none;letter-spacing:0;font-weight:400">· ${items.length}</span></h2>
+    ${open ? `
+    <div class="tiles">
+      ${items.map(b => `<div class="tile ${state.bankPlaying === b.id ? 'playing' : ''}">
+        <button class="tplay" data-act="bank-play" data-id="${b.id}" aria-label="Odsłuchaj">${state.bankPlaying === b.id ? '■' : '▶'}</button>
+        <div class="tinfo" data-act="bank-menu" data-id="${b.id}">
+          <div class="tname">${esc(b.name)}</div>
+          <div class="small muted">${b.bpm ? String(Math.round(b.bpm * 10) / 10).replace('.', ',') + ' BPM' : ''}${b.notes ? ' · ' + esc(b.notes.split('\n')[0]).slice(0, 40) : ''}</div>
+        </div>
+        <button class="vdots" data-act="bank-menu" data-id="${b.id}" aria-label="Opcje">⋮</button>
+      </div>`).join('')}
+      <label class="tile add">＋ Dodaj bity<input type="file" multiple data-act="bank-file" hidden></label>
+    </div>
+    ${state.bankBusy ? `<div class="small muted" style="margin-top:8px">${esc(state.bankBusy)}</div>` : ''}` : ''}
+  </div>`;
+}
+
 function renderProjects() {
   titleEl.textContent = 'Projekty';
   topAction.innerHTML = `<button class="btn small primary" data-act="new-project">+ Nowa</button>`;
   if (!state.projects.length) {
-    view.innerHTML = cloudHTML() + `<div class="empty"><div class="big">🎤</div>Brak piosenek.<br>Dodaj nowy projekt.<br><br>
+    view.innerHTML = cloudHTML() + bankHTML() + `<div class="empty"><div class="big">🎤</div>Brak piosenek.<br>Dodaj nowy projekt.<br><br>
       <button class="btn primary" data-act="new-project">+ Nowa piosenka</button></div>`;
     return;
   }
-  view.innerHTML = cloudHTML() + `<ul class="plist">${state.projects.map(p => {
+  view.innerHTML = cloudHTML() + bankHTML() + `<h2 class="sect">Piosenki</h2><ul class="plist">${state.projects.map(p => {
     const lines = p.sections.reduce((s, x) => s + x.lines.length, 0);
     const meta = p.beatKey ? `${Math.round(p.bpm)} BPM · ${barCount(p)} taktów · ${lines} wersów` : 'Bez bitu';
     return `<li class="${p.id === state.currentId ? 'cur' : ''}" data-act="open" data-id="${p.id}">
@@ -144,6 +165,61 @@ function renderProjects() {
       <button class="iconbtn" data-act="rename" data-id="${p.id}" aria-label="Zmień nazwę">✎</button>
       <button class="iconbtn" data-act="del-project" data-id="${p.id}" aria-label="Usuń">${ICON.trash}</button></li>`;
   }).join('')}</ul>`;
+}
+
+// ---------- bank bitów ----------
+async function bankUpload(files) {
+  const list = [...files];
+  for (let n = 0; n < list.length; n++) {
+    const f = list[n];
+    state.bankBusy = `Wczytuję ${n + 1}/${list.length}: ${f.name}…`; render();
+    try {
+      const key = 'beat-' + uid();
+      await db.putBlob(key, f);
+      let bpm = 0, dur = 0;
+      try {
+        const buf = await engine.decode(f); dur = buf.duration;
+        await new Promise(r => setTimeout(r, 20));
+        bpm = analyzeBeat(buf).bpm;
+      } catch (_) {}
+      const item = { id: 'bank-' + uid(), kind: 'bank', name: f.name.replace(/\.[^.]+$/, ''), fileName: f.name,
+        beatKey: key, bpm, duration: dur, notes: '', created: Date.now(), updated: Date.now() };
+      await db.putProject(item); pushLater(item);
+      state.bank = [item, ...(state.bank || [])];
+    } catch (e) { alert(`Nie udało się wczytać ${f.name}: ${e.message}`); }
+  }
+  state.bankBusy = ''; render();
+}
+
+async function bankPlay(id) {
+  if (state.bankPlaying === id) { engine.stop(); state.bankPlaying = null; render(); return; }
+  const b = state.bank.find(x => x.id === id);
+  await engine.unlock();
+  state.bankBusy = 'Ładuję…'; render();
+  const buf = await getBuffer(b.beatKey);
+  state.bankBusy = '';
+  if (!buf) { alert('Nie mogę wczytać tego bitu.'); render(); return; }
+  engine.play({ beat: buf, pos: 0 });
+  state.bankPlaying = id; render();
+}
+
+function bankMenu(b) {
+  modal.hidden = false;
+  modal.innerHTML = `<div class="sheet">
+    <div class="row"><b>Bit</b><span class="spacer"></span><button class="btn small" data-act="bank-close">Gotowe</button></div>
+    <div class="small muted" style="margin-top:6px">${esc(b.fileName || '')}${b.duration ? ' · ' + fmtTime(b.duration) : ''}</div>
+    <label class="small muted" style="display:block;margin-top:12px">Wyświetlana nazwa</label>
+    <input type="text" value="${esc(b.name)}" data-act="bank-name" data-id="${b.id}" style="width:100%">
+    <label class="small muted" style="display:block;margin-top:12px">Tempo (BPM)</label>
+    <input type="number" step="0.1" inputmode="decimal" value="${b.bpm ? Math.round(b.bpm * 10) / 10 : ''}" data-act="bank-bpm" data-id="${b.id}" style="width:120px">
+    <label class="small muted" style="display:block;margin-top:12px">Notatki</label>
+    <textarea data-act="bank-notes" data-id="${b.id}" rows="4" placeholder="np. pasuje na refren, klimat, do kogo…" style="width:100%">${esc(b.notes || '')}</textarea>
+    <div class="row wrap" style="margin-top:12px">
+      <button class="btn primary" data-act="bank-new" data-id="${b.id}">Nowa piosenka z tym bitem</button>
+      <span class="spacer"></span>
+      <button class="btn danger" data-act="bank-del" data-id="${b.id}">Usuń</button>
+    </div>
+  </div>`;
 }
 
 // ---------- Bit ----------
@@ -666,6 +742,7 @@ engine.onStateChange = () => {
   if (s) s.classList.toggle('playing', engine.playing);
   if (!engine.playing) updatePlayhead(true);
   if (state.tab === 'rec' && cur()) renderTransport(cur());
+  if (!engine.playing && state.bankPlaying) { state.bankPlaying = null; if (state.tab === 'projects') render(); }
 };
 
 // ---------- akcje audio ----------
@@ -1005,6 +1082,34 @@ document.addEventListener('click', async e => {
     }
     case 'sel-clear': state.sel = null; render(); return;
     case 'cut-bars': cutBars(p); return;
+    case 'bank-toggle': localStorage.setItem('bankOpen', localStorage.getItem('bankOpen') === '0' ? '1' : '0'); render(); return;
+    case 'bank-play': bankPlay(el.dataset.id); return;
+    case 'bank-menu': bankMenu(state.bank.find(x => x.id === el.dataset.id)); return;
+    case 'bank-close': modal.hidden = true; render(); return;
+    case 'bank-del': {
+      const b = state.bank.find(x => x.id === el.dataset.id);
+      if (!confirm(`Usunąć bit „${b.name}” z banku?`)) return;
+      if (state.bankPlaying === b.id) { engine.stop(); state.bankPlaying = null; }
+      db.deleteBlob(b.beatKey); buffers.delete(b.beatKey); await db.deleteProject(b.id);
+      b.updated = Date.now(); pushLater(b, true);
+      state.bank = state.bank.filter(x => x !== b); modal.hidden = true; render(); return;
+    }
+    case 'bank-new': {
+      const b = state.bank.find(x => x.id === el.dataset.id);
+      const name = prompt('Nazwa piosenki', b.name);
+      if (name === null) return;
+      engine.stop(); state.bankPlaying = null; modal.hidden = true;
+      const blob = (await db.getBlob(b.beatKey)) || (await fetchBlob(b.beatKey));
+      if (!blob) { alert('Nie mogę wczytać tego bitu.'); return; }
+      const np = newProject(name.trim() || b.name);
+      np.updated = Date.now(); state.projects.unshift(np); await db.putProject(np);
+      state.currentId = np.id; localStorage.setItem('currentId', np.id);
+      const file = new File([blob], b.fileName || (b.name + '.mp3'), { type: blob.type });
+      setTab('beat');
+      await importBeat(file);
+      if (b.bpm) { const q = cur(); q.bpm = Math.round(b.bpm * 100) / 100; clampSections(q); save(q); render(); }
+      return;
+    }
     case 'bit-collapse': localStorage.setItem('bitCollapsed', localStorage.getItem('bitCollapsed') === '1' ? '0' : '1'); render(); return;
     case 'login': case 'signup': {
       const email = $('#cl-email').value.trim(), pass = $('#cl-pass').value;
@@ -1107,6 +1212,13 @@ document.addEventListener('pointerdown', e => {
 
 document.addEventListener('input', e => {
   const el = e.target, act = el.dataset.act, p = cur();
+  if (act === 'bank-name' || act === 'bank-bpm' || act === 'bank-notes') {
+    const b = state.bank.find(x => x.id === el.dataset.id); if (!b) return;
+    if (act === 'bank-name') b.name = el.value;
+    else if (act === 'bank-bpm') b.bpm = Number(String(el.value).replace(',', '.')) || 0;
+    else b.notes = el.value;
+    save(b); return;
+  }
   if (!act || !p) return;
   if (act === 'text') { const { v } = findVersion(p, el); v.text = el.value; autoSize(el); save(); }
   else if (act === 'notes') { p.notes = el.value; save(); }
@@ -1118,7 +1230,8 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const el = e.target, act = el.dataset.act, p = cur();
   if (!act) return;
-  if (act === 'beat-file' && el.files[0]) importBeat(el.files[0]);
+  if (act === 'bank-file' && el.files.length) { bankUpload(el.files); el.value = ''; }
+  else if (act === 'beat-file' && el.files[0]) importBeat(el.files[0]);
   else if (act === 'bpm-input') { const v = Number(el.value); if (v >= 40 && v <= 240) { p.bpm = v; clampSections(p); save(); } render(); }
   else if (act === 'long-a') { p.longStartBar = Number(el.value); p.cursor = timeOfBar(p, p.longStartBar); save(); drawTimeline(); }
   else if (act === 'loop-a') { p.loopStartBar = Number(el.value); save(); }
@@ -1501,8 +1614,14 @@ window.addEventListener('resize', () => drawTimeline());
 const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 // ---------- start ----------
+async function loadAll() {
+  const all = (await db.allProjects()).sort((a, b) => b.created - a.created);
+  state.projects = all.filter(x => x.kind !== 'bank');
+  state.bank = all.filter(x => x.kind === 'bank');
+}
+
 async function reloadProjects() {
-  state.projects = (await db.allProjects()).sort((a, b) => b.created - a.created);
+  await loadAll();
   if (!cur()) { state.currentId = null; if (state.tab !== 'projects') setTab('projects'); }
 }
 
@@ -1523,7 +1642,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) sync
 setInterval(() => { if (!document.hidden && !engine.recording) syncAll(); }, 20000);
 
 (async function init() {
-  state.projects = (await db.allProjects()).sort((a, b) => b.created - a.created);
+  await loadAll();
   if (!cur()) state.currentId = null;
   setTab(cur() ? 'lyrics' : 'projects');
   refreshInputs();
