@@ -10,6 +10,7 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 - Przy każdej piosence: BPM, liczba taktów i wersów.
 
 ## Bit
+- Panel „Bit” (BPM, tempo, początek taktu) zwija się po stuknięciu nagłówka; zwinięty pokazuje tylko nazwę pliku, BPM i liczbę taktów.
 - Dodanie bitu z pliku (MP3, WAV, M4A i inne, które obsługuje przeglądarka). Zmiana bitu.
 - Automatyczne wykrywanie BPM i początku taktu 1 („Wykryj ponownie”).
 - Ręczna korekta BPM: −/+ 0,5, wpisanie liczby, −/+ 0,1, ÷2 i ×2.
@@ -26,13 +27,15 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 - Wycinanie taktów z bitu: zaznacz takty, „✂ Wytnij takty”. Sekcje, wersy i nagrania za cięciem przesuwają się razem z bitem. „↶ Cofnij ostatnie wycięcie” przywraca stan sprzed cięcia.
 - Lista sekcji z zakresem taktów i liczbą wersów, usuwanie sekcji.
 
-## Nagrywanie
-- Wiele ścieżek wokalu: dodaj, zmień nazwę, wycisz, głośność, usuń.
-- Nagrywanie (●) zaczyna się od wybranego miejsca (Long/Pętla) z bitem w tle.
-- Lista nagrań na ścieżce („Nagranie od taktu X”), usuwanie nagrań.
-- Wybór mikrofonu (domyślnie mikrofon iPhone'a), przycisk „Odśwież”.
+## Nagrywanie (osobna zakładka)
+- Widok jak w aplikacjach do nagrywania: u góry linijka z taktami i sekcjami, pod nią bit (przebieg z kolorami sekcji), niżej ścieżki wokalu z nagraniami jako kolorowe klocki z przebiegiem.
+- Lewa kolumna: nazwy ścieżek. Stuknięcie wybiera ścieżkę do nagrywania (czerwona kropka). „M” wycisza, „⋯” otwiera menu ścieżki (nazwa, głośność, usuń ścieżkę). „＋ Ścieżka” dodaje nową.
+- Oś: stuknięcie ustawia playhead (co bit), przeciąganie przewija, dwa palce zoomują (na komputerze Ctrl + kółko). W rogu czas piosenki.
+- Nagranie: stuknij, żeby zaznaczyć (biała ramka), ciągnij za lewy lub prawy brzeg, żeby przyciąć. Kosz na dole usuwa zaznaczone nagranie.
+- Dolny pasek: Long/Pętla i takt startu, ⏮ (na początek), ▶/❚❚, duży czerwony przycisk nagrywania, ■ stop, kosz. W trakcie nagrywania na ścieżce rośnie czerwony klocek.
+- Mikrofon: wybór wejścia (domyślnie mikrofon iPhone'a), „Odśwież”.
 
-## Latencja
+## Latencja (w zakładce Nagrywanie)
 - Test latencji: nagrywasz beatbox na werbel do bitu, przesuwasz suwakiem/przyciskami (−10, −1, +1, +10 ms) albo „Dopasuj automatycznie”, odsłuchujesz i zapisujesz.
 - Każde nagranie jest odtwarzane przesunięte o zapisaną latencję.
 

@@ -141,3 +141,26 @@ ol.steps { padding-left: 20px; margin: 8px 0; }
 .tl-tools { flex-wrap: wrap; row-gap: 6px; }
 .tlplay { display: inline-flex; gap: 4px; margin-left: 6px; }
 .tlplay .btn { font-size: 12px; }
+h2.collapsible { cursor: pointer; user-select: none; -webkit-user-select: none; margin-bottom: 0; }
+/* Nagrywanie – widok wielościeżkowy */
+.mt { display: flex; margin: 0 -16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.mt-heads { width: 92px; flex: none; background: var(--panel); border-right: 1px solid var(--line); }
+.mt-corner { display: flex; align-items: center; padding-left: 8px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
+.mt-head { box-sizing: border-box; border-top: 1px solid var(--line); padding: 5px 6px 5px 10px; position: relative; display: flex; flex-direction: column; justify-content: space-between; }
+.mt-head::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c, var(--muted)); }
+.mt-head.arm { background: color-mix(in srgb, #ff3b30 14%, transparent); }
+.mt-head.arm .mt-name::after { content: ' ●'; color: #ff3b30; }
+.mt-head.beat .mt-name { color: var(--muted); }
+.mt-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-hbtns { display: flex; gap: 4px; }
+.mt-mini { border: 0; border-radius: 6px; background: var(--panel2); color: var(--text); font-size: 11px; font-weight: 700; padding: 3px 7px; }
+.mt-mini.on { background: #f59e0b; color: #000; }
+.mt-add { width: 100%; border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent); font-size: 13px; font-weight: 600; padding: 10px 4px; }
+.mtc { flex: 1; min-width: 0; display: block; touch-action: pan-y; }
+.recbar { display: flex; align-items: center; justify-content: space-around; padding-top: 4px; }
+.rb { width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--panel2); color: var(--text); font-size: 17px; display: grid; place-items: center; }
+.rb:disabled { opacity: .35; }
+.rb.danger { color: #ff6b6b; }
+.recbig { width: 64px; height: 64px; border-radius: 50%; border: 4px solid var(--text); background: #ff3b30; box-shadow: inset 0 0 0 4px var(--panel); }
+.recbig.on { border-radius: 16px; animation: pulse 1s infinite; }
+.sheet { background: var(--panel); border-radius: 16px; padding: 16px; width: min(420px, calc(100vw - 32px)); }
