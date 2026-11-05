@@ -560,7 +560,8 @@ function drawMultiStatic(g, p, cw, ch, t0, X) {
 function hitTake(p, t, y) {
   const lane = Math.floor((y - MT.ruler - MT.beat) / MT.lane);
   const tr = p.tracks[lane]; if (!tr || y < MT.ruler + MT.beat) return null;
-  for (const k of tr.takes) {
+  for (let i = tr.takes.length - 1; i >= 0; i--) { // najnowsze leży na wierzchu
+    const k = tr.takes[i];
     const [ta, tb] = trimOf(k, buffers.get(k.key));
     if (t >= k.startTime + ta && t <= k.startTime + tb) return { track: tr, take: k };
   }
@@ -575,6 +576,7 @@ function bindMulti(c) {
   ['gesturestart', 'gesturechange'].forEach(ev => c.addEventListener(ev, e => e.preventDefault()));
   c.addEventListener('pointerdown', e => {
     const p = cur(); const l = local(e);
+    if (e.isPrimary) { pts.clear(); g = null; } // zgubione palce z poprzedniego gestu nie blokują stuknięć
     pts.set(e.pointerId, l);
     if (pts.size === 2) {
       const [a, b] = [...pts.values()];
@@ -820,7 +822,33 @@ async function startPlayback() {
   }
 }
 
-async function toggleRecord(trackId) {
+function recRange(p) {
+  if (p.playMode === 'loop') {
+    const a = Math.min(p.loopStartBar, p.loopEndBar), b = Math.max(p.loopStartBar, p.loopEndBar);
+    return [timeOfBar(p, a), Math.min(timeOfBar(p, b + 1), p.beatDuration)];
+  }
+  return [startPos(p), p.beatDuration];
+}
+
+/** Nadpisanie: wycina z innych nagrań ścieżki fragment [a, b]. */
+function punchOut(t, keep, a, b) {
+  const out = [];
+  for (const k of t.takes) {
+    if (k === keep) { out.push(k); continue; }
+    const [ta, tb] = trimOf(k, buffers.get(k.key));
+    const s0 = k.startTime + ta, s1 = k.startTime + tb;
+    if (s1 <= a || s0 >= b) { out.push(k); continue; }
+    if (s0 < a - 0.1) out.push({ ...k, trimEnd: a - k.startTime });
+    if (s1 > b + 0.1) out.push({ ...k, id: s0 < a ? uid() : k.id, trimStart: b - k.startTime, trimEnd: tb });
+  }
+  const used = new Set(out.map(k => k.key));
+  for (const k of t.takes) if (!used.has(k.key)) { db.deleteBlob(k.key); buffers.delete(k.key); }
+  // nowe nagranie na końcu = na wierzchu
+  t.takes = [...out.filter(k => k !== keep), keep];
+  trimCache.clear();
+}
+
+async function toggleRecord(trackId, overwrite = false) {
   const p = cur();
   if (engine.recording) { engine.stop(); return; }
   await engine.unlock();
@@ -840,7 +868,12 @@ async function toggleRecord(trackId) {
         await db.putBlob(key, blob);
         buffers.set(key, buffer);
         const t = p.tracks.find(x => x.id === trackId);
-        if (t) t.takes.push({ id: uid(), key, startTime: startPos });
+        if (t) {
+          const nk = { id: uid(), key, startTime: startPos, dur: buffer.duration };
+          t.takes.push(nk);
+          if (overwrite) punchOut(t, nk, startPos, startPos + buffer.duration);
+        }
+        mt.sel = null;
         state.recTrackId = null;
         save(p);
         render();
@@ -1178,7 +1211,30 @@ document.addEventListener('click', async e => {
     case 'add-track': { const nt = { id: uid(), name: `Ścieżka ${p.tracks.length + 1}`, muted: false, volume: 1, takes: [] }; p.tracks.push(nt); state.armId = nt.id; save(); render(); return; }
     case 'mute': { const t = p.tracks.find(x => x.id === el.dataset.id); t.muted = !t.muted; save(); render(); return; }
     case 'record': toggleRecord(el.dataset.id); return;
-    case 'mt-rec': { if (engine.recording) { engine.stop(); return; } const t = armedTrack(p); if (t) toggleRecord(t.id); return; }
+    case 'mt-rec': {
+      if (engine.recording) { engine.stop(); return; }
+      const t = armedTrack(p); if (!t) return;
+      const [ra, rb] = recRange(p);
+      const hit = t.takes.some(k => { const [ta, tb] = trimOf(k, buffers.get(k.key)); return k.startTime + tb > ra + 0.05 && k.startTime + ta < rb - 0.05; });
+      if (!hit) { toggleRecord(t.id); return; }
+      modal.hidden = false;
+      modal.innerHTML = `<div class="sheet">
+        <b>Na ścieżce „${esc(t.name)}” jest już nagranie w tym miejscu</b>
+        <p class="small muted">Nadpisz: nowe nagranie zastąpi stare w nagranym fragmencie. Nowa ścieżka: stare zostaje, nagrywasz obok.</p>
+        <div class="row wrap" style="gap:8px">
+          <button class="btn primary" data-act="rec-over" data-id="${t.id}">Nadpisz</button>
+          <button class="btn" data-act="rec-new">Nowa ścieżka</button>
+          <span class="spacer"></span><button class="btn" data-act="rec-cancel">Anuluj</button></div></div>`;
+      return;
+    }
+    case 'rec-cancel': modal.hidden = true; return;
+    case 'rec-over': modal.hidden = true; toggleRecord(el.dataset.id, true); return;
+    case 'rec-new': {
+      modal.hidden = true;
+      const nt = { id: uid(), name: `Ścieżka ${p.tracks.length + 1}`, muted: false, volume: 1, takes: [] };
+      p.tracks.push(nt); state.armId = nt.id; save(); render();
+      toggleRecord(nt.id); return;
+    }
     case 'mt-arm': if (e.target.closest('button')) return; state.armId = el.dataset.id; render(); return;
     case 'mt-track': openTrackMenu(p, p.tracks.find(x => x.id === el.dataset.id)); return;
     case 'tm-close': modal.hidden = true; render(); return;
@@ -1187,7 +1243,7 @@ document.addEventListener('click', async e => {
       if (!mt.sel || !confirm('Usunąć to nagranie?')) return;
       const t = p.tracks.find(x => x.takes.some(k => k.id === mt.sel.id));
       const k = t && t.takes.find(x => x.id === mt.sel.id);
-      if (k) { db.deleteBlob(k.key); buffers.delete(k.key); t.takes = t.takes.filter(x => x !== k); }
+      if (k) { t.takes = t.takes.filter(x => x !== k); if (!t.takes.some(x => x.key === k.key)) { db.deleteBlob(k.key); buffers.delete(k.key); } }
       mt.sel = null; save(); render(); return;
     }
     case 'del-track': {

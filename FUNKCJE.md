@@ -34,6 +34,8 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 - Lewa kolumna: nazwy ścieżek. Stuknięcie wybiera ścieżkę do nagrywania (czerwona kropka). „M” wycisza, „⋯” otwiera menu ścieżki (nazwa, głośność, usuń ścieżkę). „＋ Ścieżka” dodaje nową.
 - Oś: stuknięcie ustawia playhead (co bit), przeciąganie przewija, dwa palce zoomują (na komputerze Ctrl + kółko). W rogu czas piosenki.
 - Nagranie: stuknij, żeby zaznaczyć (biała ramka), ciągnij za lewy lub prawy brzeg, żeby przyciąć. Kosz na dole usuwa zaznaczone nagranie.
+- Jeśli nagrywanie od playheada wypada na istniejące nagranie na wybranej ścieżce, apka pyta: Nadpisz (nowe nagranie zastępuje stare w nagranym fragmencie, reszta starego zostaje), Nowa ścieżka albo Anuluj.
+- Przy nachodzących na siebie nagraniach stuknięcie zaznacza to leżące na wierzchu (najnowsze).
 - Dolny pasek: Long/Pętla i takt startu, ⏮ (na początek), ▶/❚❚, duży czerwony przycisk nagrywania, ■ stop, kosz. W trakcie nagrywania na ścieżce rośnie czerwony klocek.
 - Mikrofon: wybór wejścia (domyślnie mikrofon iPhone'a), „Odśwież”.
 
