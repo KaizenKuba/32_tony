@@ -42,7 +42,8 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 ## Tekst
 - Każdy takt = jeden wers, pogrupowane według sekcji.
 - Numeracja: numer taktu w piosence · numer wersu w sekcji.
-- Kilka wersji każdego wersu: ＋ wersja, oczko (pokaż/ukryj), kosz (usuń).
+- Kilka wersji każdego wersu. Opcje są pod trzema kropkami ⋮ przy prawej krawędzi: ＋ Wersja (dodaje kolejną linijkę pod spodem), Ukryj/Pokaż, Usuń.
+- Układ ciasny: numery dosunięte do lewej krawędzi, wersy jeden pod drugim z minimalnym odstępem, żeby było jak najwięcej miejsca na tekst.
 - Zwijanie sekcji: stuknij nagłówek sekcji (np. puste intro), wersy znikają; stuknij znowu, żeby rozwinąć. Zapamiętuje się.
 - „Śledź”: podczas odtwarzania aktualny wers jest podświetlony i przewija się na środek.
 

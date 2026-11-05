@@ -583,17 +583,19 @@ function renderLyrics(p) {
 
 function lineHTML(s, l, i) {
   const bar = s.startBar + i;
+  const menu = v => `<div class="vm">
+      <button class="vdots" data-act="ver-menu" aria-label="Opcje">⋮</button>
+      <div class="vpop" hidden>
+        <button data-act="add-ver">＋ Wersja</button>
+        <button data-act="eye" data-v="${v.id}">${v.visible ? ICON.eyeOff + ' Ukryj' : ICON.eye + ' Pokaż'}</button>
+        <button class="danger" data-act="del-ver" data-v="${v.id}">${ICON.trash} Usuń</button>
+      </div></div>`;
   return `<div class="line" data-line-bar="${bar}" data-sec="${s.id}" data-line="${l.id}">
     <div class="lnum"><span class="abs">${bar}</span><span class="rel">${i + 1}</span></div>
     <div class="versions">
       ${l.versions.map(v => v.visible ? `
-        <div class="ver"><textarea rows="1" placeholder="Wers ${i + 1}…" data-act="text" data-v="${v.id}">${esc(v.text)}</textarea>
-          <button class="iconbtn" data-act="eye" data-v="${v.id}" aria-label="Ukryj">${ICON.eye}</button>
-          <button class="iconbtn" data-act="del-ver" data-v="${v.id}" aria-label="Usuń">${ICON.trash}</button></div>` : `
-        <div class="ver hidden"><div class="ghost">${esc(v.text) || 'ukryta wersja'}</div>
-          <button class="iconbtn" data-act="eye" data-v="${v.id}" aria-label="Pokaż">${ICON.eyeOff}</button>
-          <button class="iconbtn" data-act="del-ver" data-v="${v.id}" aria-label="Usuń">${ICON.trash}</button></div>`).join('')}
-      <button class="addver" data-act="add-ver">＋ wersja</button>
+        <div class="ver"><textarea rows="1" placeholder="Wers ${i + 1}…" data-act="text" data-v="${v.id}">${esc(v.text)}</textarea>${menu(v)}</div>` : `
+        <div class="ver hidden"><div class="ghost">${esc(v.text) || 'ukryta wersja'}</div>${menu(v)}</div>`).join('')}
     </div>
   </div>`;
 }
@@ -938,6 +940,7 @@ function rerenderLine(lineEl, s, l) {
 }
 
 document.addEventListener('click', async e => {
+  if (!e.target.closest('.vm')) document.querySelectorAll('.vpop:not([hidden])').forEach(x => { x.hidden = true; });
   const el = e.target.closest('[data-act]');
   if (!el) {
     const tab = e.target.closest('#tabs button');
@@ -1057,6 +1060,11 @@ document.addEventListener('click', async e => {
     }
     case 'latency': openLatency(); return;
     case 'follow': state.follow = !state.follow; render(); return;
+    case 'ver-menu': {
+      const pop = el.nextElementSibling, open = pop.hidden;
+      document.querySelectorAll('.vpop').forEach(x => { x.hidden = true; });
+      pop.hidden = !open; return;
+    }
     case 'eye': {
       const { s, l, v, lineEl } = findVersion(p, el);
       v.visible = !v.visible; save(); rerenderLine(lineEl, s, l); return;
