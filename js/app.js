@@ -896,9 +896,16 @@ function markSection(p, kind) {
 const modal = $('#modal');
 const lt = { take: null, beatEnv: [], takeEnv: [], offset: 0 };
 
+function latencyStartBar(p) {
+  const n = barCount(p);
+  if (p.latencyStartBar && p.latencyStartBar <= n) return p.latencyStartBar;
+  const v = p.sections.find(s => s.kind === 'verse') || p.sections.find(s => s.kind !== 'intro');
+  return v ? v.startBar : Math.min(n, 1);
+}
 function latencyWindow(p) {
-  const s = timeOfBar(p, 1);
-  return [s, Math.min(timeOfBar(p, 5), p.beatDuration)];
+  const b = latencyStartBar(p);
+  const s = timeOfBar(p, b);
+  return [s, Math.min(timeOfBar(p, b + 4), p.beatDuration)];
 }
 
 function openLatency() {
@@ -913,10 +920,12 @@ function renderLatency() {
       <button class="btn small" data-act="lt-close">Zamknij</button></div>
     <ol class="steps small">
       <li>Załóż słuchawki.</li>
-      <li>Stuknij „Nagraj test” – zagrają 4 takty od początku bitu.</li>
+      <li>Stuknij „Nagraj test” – zagrają 4 takty od wybranego taktu (domyślnie początek pierwszej zwrotki).</li>
       <li>Rób beatbox na werbel razem z bitem.</li>
       <li>Przesuń nagranie (czerwone), aż werble pokryją się z bitem (niebieski), i zapisz.</li>
     </ol>
+    <div class="row"><span class="small">Start testu od taktu</span><span class="spacer"></span>
+      <select data-act="lt-start">${barOptions(cur(), latencyStartBar(cur()))}</select></div>
     <div class="row"><button class="btn primary" data-act="lt-rec" ${engine.recording ? 'disabled' : ''}>${engine.recording ? 'Nagrywam…' : '● Nagraj test'}</button></div>
     ${lt.take ? `
       <canvas class="wave" id="ltc" style="margin-top:12px"></canvas>
@@ -1234,6 +1243,7 @@ document.addEventListener('change', e => {
   else if (act === 'beat-file' && el.files[0]) importBeat(el.files[0]);
   else if (act === 'bpm-input') { const v = Number(el.value); if (v >= 40 && v <= 240) { p.bpm = v; clampSections(p); save(); } render(); }
   else if (act === 'long-a') { p.longStartBar = Number(el.value); p.cursor = timeOfBar(p, p.longStartBar); save(); drawTimeline(); }
+  else if (act === 'lt-start') { p.latencyStartBar = Number(el.value); lt.take = null; save(); renderLatency(); }
   else if (act === 'loop-a') { p.loopStartBar = Number(el.value); save(); }
   else if (act === 'loop-b') { p.loopEndBar = Number(el.value); save(); }
   else if (act === 'mic') { state.micId = el.value; localStorage.setItem('micId', el.value); }

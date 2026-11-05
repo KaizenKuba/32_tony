@@ -37,6 +37,7 @@ Dane zapisują się lokalnie na urządzeniu, a po zalogowaniu także w chmurze (
 - Mikrofon: wybór wejścia (domyślnie mikrofon iPhone'a), „Odśwież”.
 
 ## Latencja (w zakładce Nagrywanie)
+- Test latencji gra 4 takty od początku pierwszej zwrotki (albo od taktu wybranego w oknie testu, zapamiętuje się dla piosenki).
 - Test latencji: nagrywasz beatbox na werbel do bitu, przesuwasz suwakiem/przyciskami (−10, −1, +1, +10 ms) albo „Dopasuj automatycznie”, odsłuchujesz i zapisujesz.
 - Każde nagranie jest odtwarzane przesunięte o zapisaną latencję.
 
